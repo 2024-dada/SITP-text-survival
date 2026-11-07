@@ -2,8 +2,8 @@
 (function(M){'use strict';
  const D=M.D,clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
  function field(p,key,scale=30){let x=p[0]/scale,y=p[1]/scale,ix=Math.floor(x),iy=Math.floor(y),u=x-ix,v=y-iy;u=u*u*(3-2*u);v=v*v*(3-2*v);let n=(a,b)=>M.rnd(7919,key+':'+a+':'+b);return(n(ix,iy)*(1-u)+n(ix+1,iy)*u)*(1-v)+(n(ix,iy+1)*(1-u)+n(ix+1,iy+1)*u)*v;}
- function local(s,p){let w=M.weather(s.hour,s.seed),z=M.zone(p),edge=M.edgeDist(p),height=M.terrain(p),slope=Math.hypot(M.terrain([p[0]+2,p[1]])-height,M.terrain([p[0],p[1]+2])-height)/2;
-  let canopy=clamp((z?.biome==='woodland'?.45:z?.biome==='scrub'?.15:.03)+field(p,'canopy')*.45),shrub=field(p,'shrub',19),rock=field(p,'rock',12),litter=clamp(canopy*.7+field(p,'litter',9)*.3),wet=.10;for(let i=0;i<24;i++)wet+=M.weather(s.hour-i,s.seed).rain*.04*Math.exp(-i/8);wet=clamp(wet+canopy*.14);
+ function local(s,p){let w=M.weather(s.hour,s.seed,p),z=M.zone(p),edge=M.edgeDist(p),height=M.terrain(p),slope=Math.hypot(M.terrain([p[0]+2,p[1]])-height,M.terrain([p[0],p[1]+2])-height)/2;
+  let canopy=clamp((z?.biome==='woodland'?.45:z?.biome==='scrub'?.15:.03)+field(p,'canopy')*.45),shrub=field(p,'shrub',19),rock=field(p,'rock',12),litter=clamp(canopy*.7+field(p,'litter',9)*.3),wet=.10;for(let i=0;i<24;i++)wet+=M.weather(s.hour-i,s.seed,p).rain*.04*Math.exp(-i/8);wet=clamp(wet+canopy*.14);
   const resources={};for(const point of D.sites){let d=Math.hypot(point.east_m-p[0],point.north_m-p[1]),r=point.radius_m||24;if(d>r)continue;let fall=1-d/r,site=s.sites.find(a=>a.id===point.id);for(const a of site.pools){let v=resources[a.resource]||(resources[a.resource]={amount:0,capacity:0,coverage:0});v.amount+=a.amount*fall;v.capacity+=a.capacity*fall;v.coverage+=fall;}}
   return{w,z,edge,height,slope,canopy,shrub,rock,litter,wet,resources};}
  function marine(s,p,w){let pool={R05:0,R06:0,R07:0},found=false;for(const point of D.sites){if(Math.hypot(point.east_m-p[0],point.north_m-p[1])>85)continue;for(const a of s.sites.find(x=>x.id===point.id).pools)if(a.resource in pool){pool[a.resource]+=a.amount;found=true;}}
