@@ -27,7 +27,7 @@
   let objects=[];for(const point of D.sites){let x=point.east_m-p[0],y=point.north_m-p[1],d=Math.hypot(x,y);if(d>reach||d<2||(x*dx+y*dy)/d<.65||block&&d>block+12)continue;objects.push({point,d});}objects.sort((a,b)=>a.d-b.d);
   return{reach,landEnd,block,peak,objects};}
  function observe(s,p){let w=weather(s.hour,s.seed),z=zone(p);if(!inside(p))return{valid:false,cards:[],role:'请将观察点放在陆地内。'};
-  let ground=z?.biome==='shore'?'岸边砂砾与碎屑':z?.biome==='woodland'?'落叶和腐殖层':'低矮灌木间的土石地面';let compass=[['北',0,1],['东',1,0],['南',0,-1],['西',-1,0]];
+  let wetIndex=.12;for(let i=0;i<24;i++)wetIndex+=weather(s.hour-i,s.seed).rain*.04*Math.exp(-i/8);wetIndex=clamp(wetIndex+(z?.biome==='woodland'?.12:0),0,1);let ground=z?.biome==='shore'?'岸边砂砾与碎屑':z?.biome==='woodland'?'落叶和腐殖层':'低矮灌木间的土石地面';let compass=[['北',0,1],['东',1,0],['南',0,-1],['西',-1,0]];
   let cards=compass.map(([name,dx,dy])=>{let v=sight(p,w,dx,dy),parts=[];if(!w.daylight)parts.push('夜色压低了可辨范围，远处地形没有可靠细节。');else if(w.rain)parts.push('雨幕使远景变得模糊，叶片和地面持续受雨。');else parts.push('近处轮廓可辨；远景仍会被地形与植被挡住。');
     if(v.block)parts.push(`约 ${Math.round(v.block/5)*5} 米外，${v.peak>terrain(p)+3?'较高地势和':'相连的'}植被遮住更远处；不能据此判断后方资源。`);
     else if(v.landEnd)parts.push(`沿这一方向，陆地向海岸收束；${v.landEnd<35?'近处':'较远处'}可辨${w.tide>0?'涨起的海面':'露出的部分岸滩'}。`);
@@ -36,7 +36,7 @@
     return{name,text:[...new Set(parts)].join('\n'),reach:v.reach,targets:targets.map(t=>t.point.id)};});
   let sunVisible=w.sun.alt>0&&w.cloud<.65&&w.rain===0&&z?.biome!=='woodland';let sky=w.sun.alt<0?'天空已暗，不能依靠太阳辨别方向。':sunVisible?(w.sun.alt>65?'太阳位置很高，短影不利于判断精细方位。':w.date.getUTCHours()<12?'太阳位于较低的上午天空，影子朝相反方向延伸。':'太阳已偏向午后天空，影子方向与上午不同。'):z?.biome==='woodland'?'树冠遮挡了直接观察太阳的条件，当前不能据此确定方向。':'云层或降雨遮蔽了太阳，当前无法可靠用太阳判断方向。';
   cards.push({name:'上方',text:sky+'\n'+(z?.biome==='woodland'?'树冠遮住部分天空；即使晴天也未必能直接看到太阳。':'树冠较稀，抬头能辨认较大范围天空。'),reach:0,targets:[]});
-  cards.push({name:'脚下',text:`这里是${ground}，${w.rain?'地面正在变湿，浅洼可能积水':'可接触的地表干湿随先前降雨和晾晒变化'}。\n模拟地形${edgeDist(p)<20?'临近岸缘':'位于内陆'}；脚下没有因插值而新增可采资源。`,reach:0,targets:[]});
+  cards.push({name:'脚下',text:`这里是${ground}，${w.rain?'雨水正打湿地面，低处可能积水':wetIndex>.55?'地表仍明显湿润，先前的雨水尚未完全退去':wetIndex>.25?'表层略带潮意，阴影处比开阔处更湿':'表层较干，落叶和砂砾的轮廓更清楚'}。\n模拟地形${edgeDist(p)<20?'临近岸缘':'位于内陆'}；脚下没有因插值而新增可采资源。`,reach:0,targets:[]});
   let role=['你站在'+ground+'上。',sky,...cards.slice(0,4).map((c,i)=>['面前','右侧','身后','左侧'][i]+'：'+c.text)].join('\n');
   return{valid:true,zone:z,cards,role,weather:w,height:terrain(p),sunVisible,frame:'面前仅指本次朝向，未赋予角色绝对方位；不包含后台库存。'};
  }
