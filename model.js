@@ -44,8 +44,25 @@
  }return s;}
  function harvest(s,siteId,rid){let p=s.sites.find(x=>x.id===siteId),a=p?.pools.find(x=>x.resource===rid);if(!a||rid==='R08')throw Error('该对象不可试采');if(['R05','R06','R07'].includes(rid)){let w=weather(s.hour,s.seed);if(!w.daylight||w.tide>0)throw Error('当前模拟潮位或昼夜不允许岸边采集');}let q=Math.min(a.amount,['个','只'].includes(a.unit)?1:.5);if(q<=0)throw Error('库存已耗尽');a.amount-=q;s.ledger.harvest[rid]=(s.ledger.harvest[rid]||0)+q;event(s,`${siteId} 试采 ${D.pools[rid].name} ${q} ${a.unit}；仅是研究者扰动，不代表人物动作`);return q;}
  function totals(s){let out={};for(const p of s.sites)for(const a of p.pools){let o=out[a.resource]||(out[a.resource]={amount:0,capacity:0,unit:a.unit});o.amount+=a.amount;o.capacity+=a.capacity;}return out;}
- function validate(x){if(!x||x.version!=='observation-v3'||!Number.isInteger(x.hour*4)||x.hour<0||x.hour>24*366*100||!Number.isInteger(x.seed)||!Array.isArray(x.sites)||x.sites.length!==D.sites.length||typeof x.collector!=='boolean')throw Error('存档格式或版本不匹配');for(let i=0;i<D.sites.length;i++){let p=x.sites[i],base=D.sites[i];if(p.id!==base.id||!Number.isFinite(p.wet)||p.wet<0||p.wet>1||p.pools.length!==base.stocks.length)throw Error('资源点不合法');for(let j=0;j<p.pools.length;j++){let a=p.pools[j],b=base.stocks[j];if(a.resource!==b.resource||a.capacity!==b.capacity||a.daily_input!==b.daily_input||!Number.isFinite(a.amount)||a.amount<0||a.amount>a.capacity||!Number.isFinite(a.credit)||a.credit<0||!Array.isArray(a.young))throw Error('资源值不合法');for(const [day,n]of a.young)if(!Number.isInteger(day)||!Number.isInteger(n)||n<0||day<0)throw Error('幼体数据不合法');if(a.amount+a.young.reduce((v,k)=>v+k[1],0)>a.capacity)throw Error('种群超出容量');}}
- for(const p of x.sites)for(const a of p.pools){if(!['credit','deathCredit','decay'].every(k=>Number.isFinite(a[k])&&a[k]>=0)||!['kg','个','只'].includes(a.unit))throw Error('资源累积值不合法');}
- for(const k of ['W01','W02'])if(!Number.isFinite(x.water?.[k])||x.water[k]<0||x.water[k]>D.water[k].capacity_L)throw Error('水量不合法');if(!Array.isArray(x.selected)||x.selected.length!==2||!x.selected.every(Number.isFinite)||!inside(x.selected))throw Error('观察位置不合法');if(!Array.isArray(x.log)||x.log.length>100||x.log.some(e=>!Number.isInteger(e.hour*4)||e.hour<0||typeof e.text!=='string')||!x.ledger||!['rain_L','evaporated_L','overflow_L'].every(k=>Number.isFinite(x.ledger[k])&&x.ledger[k]>=0)||!x.ledger.harvest||Object.values(x.ledger.harvest).some(v=>!Number.isFinite(v)||v<0))throw Error('日志或账本不合法');return x;}
+ function validate(x){
+  if(!x||x.version!=='observation-v3'||!Number.isInteger(x.hour*4)||x.hour<0||x.hour>24*366*100||!Number.isInteger(x.seed)||!Array.isArray(x.sites)||x.sites.length!==D.sites.length||typeof x.collector!=='boolean')throw Error('存档格式或版本不匹配');
+  for(let i=0;i<D.sites.length;i++){
+   let p=x.sites[i],base=D.sites[i];
+   if(!p||p.id!==base.id||!Number.isFinite(p.wet)||p.wet<0||p.wet>1||!Array.isArray(p.pools)||p.pools.length!==base.stocks.length)throw Error('资源点不合法');
+   for(let j=0;j<p.pools.length;j++){
+    let a=p.pools[j],b=base.stocks[j];
+    const oldAnimalCapacity=(a?.resource==='R04'&&a.capacity===8)||(a?.resource==='R08'&&a.capacity===12);
+    if(!a||a.resource!==b.resource||a.daily_input!==b.daily_input||!Number.isFinite(a.capacity)||a.capacity<0||(a.capacity!==b.capacity&&!oldAnimalCapacity)||!Number.isFinite(a.amount)||a.amount<0||a.amount>a.capacity||!Number.isFinite(a.credit)||a.credit<0||!Array.isArray(a.young))throw Error('资源值不合法');
+    for(const [day,n]of a.young)if(!Number.isInteger(day)||!Number.isInteger(n)||n<0||day<0)throw Error('幼体数据不合法');
+    if(a.amount+a.young.reduce((v,k)=>v+k[1],0)>a.capacity)throw Error('种群超过容量');
+    if(a.capacity<b.capacity)a.capacity=b.capacity;
+   }
+  }
+  for(const p of x.sites)for(const a of p.pools){if(!['credit','deathCredit','decay'].every(k=>Number.isFinite(a[k])&&a[k]>=0)||!['kg','个','只'].includes(a.unit))throw Error('资源累积值不合法');}
+  for(const k of ['W01','W02'])if(!Number.isFinite(x.water?.[k])||x.water[k]<0||x.water[k]>D.water[k].capacity_L)throw Error('水量不合法');
+  if(!Array.isArray(x.selected)||x.selected.length!==2||!x.selected.every(Number.isFinite)||!inside(x.selected))throw Error('观察位置不合法');
+  if(!Array.isArray(x.log)||x.log.length>100||x.log.some(e=>!Number.isInteger(e.hour*4)||e.hour<0||typeof e.text!=='string')||!x.ledger||!['rain_L','evaporated_L','overflow_L'].every(k=>Number.isFinite(x.ledger[k])&&x.ledger[k]>=0)||!x.ledger.harvest||Object.values(x.ledger.harvest).some(v=>!Number.isFinite(v)||v<0))throw Error('日志或账本不合法');
+  return x;
+ }
  G.IslandModel={D,create,tick,weather,harvest,totals,inside,terrain,zone,edgeDist,validate,rnd,event,RAIN_CROSSING_HOURS};
 })(globalThis);
