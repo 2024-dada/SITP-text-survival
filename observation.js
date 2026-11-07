@@ -68,11 +68,11 @@ function local(s,p){
     if(d>r)continue;
     const fall=1-d/r,site=s.sites.find(a=>a.id===point.id);
     for(const a of site.pools){
-      const v=resources[a.resource]||(resources[a.resource]={amount:0,capacity:0,coverage:0});
-      v.amount+=a.amount*fall;v.capacity+=a.capacity*fall;v.coverage+=fall;
+      const v=resources[a.resource]||(resources[a.resource]={amount:0,capacity:0,coverage:0}),population=a.amount+(a.young||[]).reduce((n,c)=>n+(c[1]||0),0);
+      v.amount+=population*fall;v.capacity+=a.capacity*fall;v.coverage+=fall;
       if(fall>=.5){
         const n=nearResources[a.resource]||(nearResources[a.resource]={amount:0,capacity:0,coverage:0});
-        n.amount+=a.amount*fall;n.capacity+=a.capacity*fall;n.coverage+=fall;
+        n.amount+=population*fall;n.capacity+=a.capacity*fall;n.coverage+=fall;
       }
     }
   }
