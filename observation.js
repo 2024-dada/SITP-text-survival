@@ -220,7 +220,7 @@ function trendText(t){
 }
 function blockText(s){
   const what=s.blockCause==='both'?'抬高的地面和树冠':s.blockCause==='canopy'?'连续的枝叶':'抬升的地面';
-  const at=s.block<=25?`近处约${s.block}米`:`约${s.block}米外`;
+  const at=`约${Math.round(s.block)}米处`;
   return`${at}，${what}挡住正前方更远处的景物。`;
 }
 function sectorEdge(s,p,dir,reach,eye){
@@ -230,8 +230,8 @@ function sectorEdge(s,p,dir,reach,eye){
 }
 function coastText(se,eL,eR,w){
   const nearest=se.nearest;
-  let out=`约${nearest}米外是水边。`;
-  if(nearest<=10)out=`水边就在${nearest}米内，脚下很快变成湿砂或礁面。`;
+  let out=`约${nearest}米处是水边。`;
+  if(nearest<=10)out=`约${nearest}米处是水边，岸缘以湿砂或礁面为主。`;
   if(eL===null&&eR!==null)out+='岸线向右侧斜过去。';
   else if(eR===null&&eL!==null)out+='岸线向左侧斜过去。';
   else if(eL!==null&&eR!==null){
@@ -280,7 +280,7 @@ function marineLines(s,sp,p,dir,w){
   const a=amountOf(site);
   const d=Math.hypot(sp.cx-p[0],sp.cy-p[1]);
   const b=bearingText(p,[sp.cx,sp.cy],dir);
-  const where=`${b.side}约${Math.round(d/5)*5}米`;
+  const where=`${b.side}约${Math.round(d/5)*5}米处`;
   if(w.rain>5)return[`${where}的海面被雨幕压住，无法分辨水下细节。`];
   if(!w.daylight)return[`${where}只剩浪声和暗色反光，不能可靠分辨鱼影或贝类。`];
   if(d>120)return[`${where}只剩水面反光，距离太远，不能分辨鱼影或礁缝贝类。`];
@@ -293,12 +293,17 @@ function marineLines(s,sp,p,dir,w){
       :`${where}水面较平，暂未看到明确鱼影；这不代表这片海里没有鱼。`);
   }
   if(a.R06>0&&d<=60){
-    const cue=a.R06>25?'贝类痕迹较密':a.R06>8?'能辨认带肉贝类':'只有零散附着贝类';
-    out.push(w.tide<=TIDE_LOW
-      ?`${where}，${d<15?'脚边的':'稍远的'}退露礁缝上${cue}，仍需靠近逐个确认。`
-      :`${where}的礁面多被海水覆盖，贝类此刻不易接近。`);
+    const cue=a.R06>25?'多处礁缝可见贝类附着':a.R06>8?'几处礁缝能辨出带肉贝类':'零星礁缝有附着物，是否带肉还需靠近确认';
+    if(w.tide<=TIDE_LOW){
+      out.push(`${where}的退露礁缝上${cue}，仍需靠近逐个确认。`);
+    }else{
+      const reef=d<=15?'近岸浅礁':`${where}的礁面`;
+      const cover=d<=15?'被浅水盖住':'沉在水线下';
+      const submerged=a.R06>25?'水下仍能辨出较连续的附着痕迹，细缝被水面反光遮住。':a.R06>8?'水下偶尔闪过浅色附着点，具体数量看不清。':'水面反光盖住细节，零星附着点暂时无法确认。';
+      out.push(`${reef}${cover}，${submerged}`);
+    }
   }
-  if(a.R07>0&&d<=60&&w.tide<=0&&roll('crab')<.6)out.push(`${where}潮湿裂隙边偶有小型甲壳类移动。`);
+  if(a.R07>0&&d<=60&&w.tide<=0&&roll('crab')<.6)out.push(`${b.side}约${Math.round(d/5)*5}米处的潮湿裂隙中，偶有小型甲壳类移动。`);
   if(!out.length)out.push(`${where}水面没有可辨的近岸细节，不能凭外观推断库存。`);
   return out;
 }
