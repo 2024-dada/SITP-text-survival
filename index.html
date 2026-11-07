@@ -1,4 +1,4 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SITP · 岛屿观测台</title><link rel="stylesheet" href="style.css"><script defer src="data.js"></script><script defer src="model.js"></script><script defer src="observation.js"></script><script defer src="app.js"></script></head><body>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SITP · 岛屿观测台</title><link rel="stylesheet" href="style.css?v=2.0.1"><script defer src="data.js?v=2.0.1"></script><script defer src="model.js?v=2.0.1"></script><script defer src="observation.js?v=2.0.1"></script><script defer src="app.js?v=2.0.1"></script></head><body>
 <header><a class="brand" href="./"><span>◈</span><div>OLORUA<small>SITP · 文本生存 / 岛屿建模</small></div></a><div class="headRight"><span class="badge">浏览器独立实验</span><button id="help">使用说明</button><a href="https://github.com/2024-dada/SITP-text-survival" target="_blank" rel="noopener">GitHub ↗</a></div></header>
 <main><section class="intro"><div><div class="eyebrow">ISLAND OBSERVATORY / 第二阶段</div><h1>把一个位置，读成一个世界。</h1><p>悬停预览 · 点击固定 · 六个方向同时观察 · 按小时演化</p></div><div class="introNote">v2 · 836个20米细分格 / 219个资源地带，采用丰富资源实验情景。<br>1 m 是定位步长；地形依据约90 m高程采样插值，非实测精度。</div></section>
 <section class="clockbar"><div><small>实验时间 · 斐济本地模拟时钟</small><strong id="date"></strong><span id="season"></span></div><div class="timeButtons"><button id="play">▶ 自动</button><button data-step="1">+1 小时</button><button data-step="24">+1 天</button><button data-step="720">+30 天</button><button data-step="8760">+1 年</button></div><div class="saveButtons"><button id="save">保存</button><button id="load">载入</button><button id="reset">重置</button><input type="file" id="file" accept="application/json,.json" hidden></div></section>
@@ -10,4 +10,5 @@
 <footer><span>数据参考：OSM岸线 · FMS Lakeba温雨 · GLO90高程采样</span><span>纯静态 / 无模型API / 不含人物指标</span></footer></main>
 <dialog id="guide"><h2>地图怎么用</h2><p>鼠标移动到陆地上，右侧六个方框一起更新。单击固定观察点；点“鼠标预览”恢复跟随。地图获得焦点后，方向键每次移动约1米。</p><p>时间按钮会真正更新资源、水源和材料状态。自动模式每秒推进1小时；切换到后台时暂停，不按现实时间追赶。保存可导出JSON，关闭页面不自行演化。</p><p>先选资源点附近，点击下方“研究试采”，再看库存和文字变化。试采仅作扰动演示，没有背包和身体模块。</p><p>地形是粗采样插值，836个细分格、219个资源地带及植物分布是设计；太阳按本地近似太阳时计算。方位、数量、雨量等后台值不直接等同角色知识。</p><button id="closeHelp">知道了</button></dialog>
 </body></html>
+
 
