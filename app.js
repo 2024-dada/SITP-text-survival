@@ -15,8 +15,8 @@ function drawBase(){
 
 function drawRain(){let layer=$('localRain');layer.replaceChildren();for(let x=D.bounds[0];x<D.bounds[2];x+=25){let w=M.weather(state.hour,state.seed,[x+12.5,0]);if(w.rain<=0&&w.cloud<.78)continue;layer.append(svg('rect',{x,y:-600,width:25,height:1200,fill:w.rain>0?'#4582a8':'#7d8b99',opacity:w.rain>0?Math.min(.48,.15+w.rain*.025):.12}));} }
 function render(){const w=M.weather(state.hour,state.seed,position),obs=M.observe(state,position);$('date').textContent=dateLabel(w.date);$('season').textContent=w.season+' · '+w.label;$('currentWeather').textContent=`${w.temperature.toFixed(1)} ℃ / ${w.rain.toFixed(1)} mm·h⁻¹ / ${w.daylight?'白昼':'夜间'}`;$('rainLayer').setAttribute('opacity',0);drawRain();$('nightLayer').setAttribute('opacity',w.daylight?0:.45);$('viewStatus').textContent=locked?'点击已固定 · 时间仍在演化':'随鼠标预览';$('unlock').textContent=locked?'恢复鼠标预览':'鼠标预览';$('marker').setAttribute('transform',`translate(${position[0]},${-position[1]})`);$('position').textContent=`1 m 模拟格 · E ${position[0]} / N ${position[1]} m · 高程插值 ${M.terrain(position).toFixed(1)} m`;
- $('cards').replaceChildren();for(const c of obs.cards){let card=document.createElement('article');card.className='viewCard'+(['上方','脚下'].includes(c.name)?' vertical':'');let h=document.createElement('h3'),small=document.createElement('span'),p=document.createElement('p');h.textContent=c.name;small.textContent=c.reach?`可辨上限约 ${c.reach} m`:'垂直观察';h.append(small);p.textContent=c.text;card.append(h,p);$('cards').append(card);}
- $('roleText').textContent=(obs.frame||'')+'\n\n'+obs.role;$('regionTitle').textContent=obs.zone?obs.zone.id+' · '+obs.zone.name:'陆地区域';$('localInfo').textContent=obs.valid?`此处属于${obs.zone?.name||'岸缘'}，20米细分格面积约 ${obs.zone?.area_m2||0} m²。树冠覆盖约 ${Math.round((obs.local?.canopy||0)*100)}%，地表湿润指数 ${Math.round((obs.local?.wet||0)*100)}。仅研究者可见，均为模拟值；1米内插不代表实测。按方向键可逐米移动固定观察点。`:'将鼠标放在陆地上。';
+ $('background').textContent=obs.background||'';$('cards').replaceChildren();for(const c of obs.cards){let card=document.createElement('article');card.className='viewCard'+(['上方','脚下'].includes(c.name)?' vertical':'');let h=document.createElement('h3'),small=document.createElement('span'),p=document.createElement('p');h.textContent=c.name;small.textContent=c.reach?`可辨上限约 ${c.reach} m`:'垂直观察';h.append(small);p.textContent=c.text;card.append(h,p);$('cards').append(card);}
+ $('roleText').textContent=(obs.frame||'')+'\n\n'+obs.role;$('regionTitle').textContent=obs.zone?obs.zone.id+' · '+obs.zone.name:'陆地区域';$('localInfo').textContent=obs.valid?`此处属于${obs.zone?.name||'岸缘'}，20米细分格面积约 ${obs.zone?.area_m2||0} m²。树冠覆盖约 ${Math.round((obs.local?.canopy||0)*100)}%，地表湿润指数 ${Math.round((obs.local?.wet||0)*100)}。观测算法 ${obs.algorithm||'obs-dir-v4'}：按方向分别采样近/中/远景、坡度、岸线与视线遮挡。仅研究者可见，均为模拟值；1米内插不代表实测。按方向键可逐米移动固定观察点。`:'将鼠标放在陆地上。';
  $('nearby').replaceChildren();let near=D.sites.filter(s=>Math.hypot(s.east_m-position[0],s.north_m-position[1])<45).sort((a,b)=>Math.hypot(a.east_m-position[0],a.north_m-position[1])-Math.hypot(b.east_m-position[0],b.north_m-position[1]));for(const s of near){let div=document.createElement('div');div.className='target';let head=document.createElement('strong');head.textContent=s.id+' · '+s.name;div.append(head);let local=state.sites.find(p=>p.id===s.id);for(const a of local.pools){let row=document.createElement('div');row.textContent=`${D.pools[a.resource].name}：${a.amount.toFixed(a.unit==='kg'?1:0)} / ${a.capacity} ${a.unit}`;div.append(row);if(a.resource!=='R08'){let b=document.createElement('button');b.textContent='研究试采';b.onclick=()=>{try{M.harvest(state,s.id,a.resource);render();}catch(e){toast(e.message);}};div.append(b);}}
  if(s.id==='08'){let r=document.createElement('p');r.textContent=`岩池 ${state.water.W01.toFixed(2)} / 1 L（原水）`;div.append(r);}if(s.id==='01'){let r=document.createElement('p');r.textContent=state.collector?`集雨器 ${state.water.W02.toFixed(2)} / 10 L`:'集雨器尚未建成';div.append(r);}$('nearby').append(div);}
  if(!near.length){let p=document.createElement('small');p.textContent='45米内没有已配置的资源地带；景物仍由局部地形与植被生成。';$('nearby').append(p);}
@@ -27,7 +27,25 @@ function render(){const w=M.weather(state.hour,state.seed,position),obs=M.observ
  $('events').replaceChildren();let entries=state.log.slice().reverse();if(!entries.length)entries=[{hour:state.hour,text:'世界已初始化。推进时间会演化自然状态；研究试采后会记录扰动。'}];for(const e of entries){let p=document.createElement('p'),t=document.createElement('small');t.textContent=dateLabel(M.weather(e.hour,state.seed).date)+' · ';p.append(t,document.createTextNode(e.text));$('events').append(p);}}
 function pause(){if(timer){clearInterval(timer);timer=null;}$('play').textContent='▶ 自动';}
 function step(n){M.tick(state,n);state.selected=position.slice();render();}
-function mapPoint(e){let pt=$('map').createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;pt=pt.matrixTransform($('map').getScreenCTM().inverse());return[Math.floor(pt.x),Math.floor(-pt.y)];}
+// Camera only: zoom never modifies world time, selected position or inventories.
+const fullMapView={x:-380,y:-525,width:820,height:1030};
+function mapCoordinates(e){let pt=$('map').createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;return pt.matrixTransform($('map').getScreenCTM().inverse());}
+function mapPoint(e){let pt=mapCoordinates(e);return[Math.floor(pt.x),Math.floor(-pt.y)];}
+function resetMapView(){$('map').setAttribute('viewBox',`${fullMapView.x} ${fullMapView.y} ${fullMapView.width} ${fullMapView.height}`);$('zoomLevel').textContent='1.0×';}
+$('map').addEventListener('wheel',e=>{
+ if(e.ctrlKey)return; // Preserve the browser's Ctrl+wheel accessibility zoom.
+ e.preventDefault();
+ const map=$('map'),v=map.viewBox.baseVal,anchor=mapCoordinates(e);
+ const unit=e.deltaMode===1?16:e.deltaMode===2?map.clientHeight:1;
+ const delta=Math.max(-120,Math.min(120,e.deltaY*unit));
+ const width=Math.max(fullMapView.width/12,Math.min(fullMapView.width,v.width*Math.exp(delta*.002)));
+ if(Math.abs(width-v.width)<.000001)return;
+ if(width>=fullMapView.width){resetMapView();return;}
+ const ratio=width/v.width,x=anchor.x+(v.x-anchor.x)*ratio,y=anchor.y+(v.y-anchor.y)*ratio;
+ map.setAttribute('viewBox',`${x} ${y} ${width} ${v.height*ratio}`);
+ $('zoomLevel').textContent=(fullMapView.width/width).toFixed(1)+'×';
+},{passive:false});
+$('resetView').onclick=resetMapView;
 $('map').addEventListener('pointermove',e=>{if(locked||performance.now()-lastMove<60)return;lastMove=performance.now();let p=mapPoint(e);if(M.inside(p)){position=p;state.selected=p.slice();render();}});
 $('map').addEventListener('click',e=>{let p=mapPoint(e);if(!M.inside(p)){toast('当前点在海面，请选择陆地内的观察位置。');return;}position=p;locked=true;state.selected=p.slice();render();});
 $('map').addEventListener('keydown',e=>{let d={ArrowUp:[0,1],ArrowRight:[1,0],ArrowDown:[0,-1],ArrowLeft:[-1,0]}[e.key];if(!d)return;e.preventDefault();let p=[position[0]+d[0],position[1]+d[1]];if(M.inside(p)){position=p;locked=true;state.selected=p.slice();render();}});

@@ -28,7 +28,19 @@
     if(a.resource==='R03'){a.decay+=a.amount*.025/24*dt;let lost=Math.min(a.amount,Math.floor(a.decay));a.decay-=lost;a.amount-=lost;}
     if(['个','只'].includes(a.unit)){a.credit+=input;input=Math.floor(a.credit);a.credit-=input;}a.amount=Math.min(a.capacity,a.amount+input);if(a.amount===a.capacity)a.credit=0;
   }}s.hour+=dt;
-  if((s.hour+9)%24===0){let day=Math.floor((s.hour+9)/24);for(const site of s.sites)for(const a of site.pools){if(!['R04','R06','R08'].includes(a.resource))continue;let r=a.resource,delay=r==='R08'?180:365,mort=r==='R06'?.15:r==='R04'?.10:.16,birth=r==='R06'?.35:r==='R04'?.24:.32;a.deathCredit+=a.amount*mort/365;let dead=Math.min(a.amount,Math.floor(a.deathCredit));a.deathCredit-=dead;a.amount-=dead;let mature=a.young.filter(x=>x[0]<=day).reduce((v,x)=>v+x[1],0);a.young=a.young.filter(x=>x[0]>day);a.amount+=mature;let free=Math.max(0,a.capacity-a.amount-a.young.reduce((v,x)=>v+x[1],0));a.credit+=free?(r==='R06'?a.capacity:a.amount>=2?a.amount:0)*birth/365:0;let young=Math.min(free,Math.floor(a.credit));a.credit=free>young?a.credit-young:0;if(young)a.young.push([day+delay,young]);if(mature)event(s,`${r} 有 ${mature} 个幼体成熟（模拟）`);}}
+  if((s.hour+9)%24===0){
+   let day=Math.floor((s.hour+9)/24);const matured=new Map();
+   for(const site of s.sites)for(const a of site.pools){
+    if(!['R04','R06','R08'].includes(a.resource))continue;
+    let r=a.resource,delay=r==='R08'?180:365,mort=r==='R06'?.15:r==='R04'?.10:.16,birth=r==='R06'?.35:r==='R04'?.24:.32;
+    a.deathCredit+=a.amount*mort/365;let dead=Math.min(a.amount,Math.floor(a.deathCredit));a.deathCredit-=dead;a.amount-=dead;
+    let mature=a.young.filter(x=>x[0]<=day).reduce((v,x)=>v+x[1],0);a.young=a.young.filter(x=>x[0]>day);a.amount+=mature;
+    let free=Math.max(0,a.capacity-a.amount-a.young.reduce((v,x)=>v+x[1],0));a.credit+=free?(r==='R06'?a.capacity:a.amount>=2?a.amount:0)*birth/365:0;
+    let young=Math.min(free,Math.floor(a.credit));a.credit=free>young?a.credit-young:0;if(young)a.young.push([day+delay,young]);
+    if(mature){let e=matured.get(r);if(!e){e={count:0,unit:a.unit,sites:[]};matured.set(r,e);}e.count+=mature;e.sites.push(site.id);}
+   }
+   for(const [r,e]of matured){const ids=e.sites.slice(0,5).join('、'),more=e.sites.length>5?`等共${e.sites.length}处`:'';event(s,`${r} 共 ${e.count} ${e.unit}幼体成熟，涉及资源点 ${ids}${more}（模拟）`);}
+  }
  }return s;}
  function harvest(s,siteId,rid){let p=s.sites.find(x=>x.id===siteId),a=p?.pools.find(x=>x.resource===rid);if(!a||rid==='R08')throw Error('该对象不可试采');if(['R05','R06','R07'].includes(rid)){let w=weather(s.hour,s.seed);if(!w.daylight||w.tide>0)throw Error('当前模拟潮位或昼夜不允许岸边采集');}let q=Math.min(a.amount,['个','只'].includes(a.unit)?1:.5);if(q<=0)throw Error('库存已耗尽');a.amount-=q;s.ledger.harvest[rid]=(s.ledger.harvest[rid]||0)+q;event(s,`${siteId} 试采 ${D.pools[rid].name} ${q} ${a.unit}；仅是研究者扰动，不代表人物动作`);return q;}
  function totals(s){let out={};for(const p of s.sites)for(const a of p.pools){let o=out[a.resource]||(out[a.resource]={amount:0,capacity:0,unit:a.unit});o.amount+=a.amount;o.capacity+=a.capacity;}return out;}
