@@ -1,6 +1,6 @@
 'use strict';
 const M=IslandModel,D=M.D,$=id=>document.getElementById(id),NS='http://www.w3.org/2000/svg';
-let state=M.create(),position=state.selected.slice(),locked=false,timer=null,toastTimer=null,lastMove=0;
+let state=M.create(),position=state.selected.slice(),locked=false,timer=null,toastTimer=null,lastMove=0,mapPan=null,suppressMapClick=false;
 function svg(tag,attrs,text){let n=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);if(text)n.textContent=text;return n;}
 function path(poly){return poly.map((p,i)=>(i?'L':'M')+p[0]+','+(-p[1])).join(' ')+'Z';}
 function toast(text){$('toast').textContent=text;$('toast').style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').style.display='none',4000);}
@@ -29,12 +29,18 @@ function pause(){if(timer){clearInterval(timer);timer=null;}$('play').textConten
 function step(n){M.tick(state,n);state.selected=position.slice();render();}
 // Camera only: zoom never modifies world time, selected position or inventories.
 const fullMapView={x:-380,y:-525,width:820,height:1030};
+const mapPanZoomThreshold=1.05,mapDragThreshold=3;
 function mapCoordinates(e){let pt=$('map').createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;return pt.matrixTransform($('map').getScreenCTM().inverse());}
+function mapCoordinatesWith(e,matrix){let pt=$('map').createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;return pt.matrixTransform(matrix);}
 function mapPoint(e){let pt=mapCoordinates(e);return[Math.floor(pt.x),Math.floor(-pt.y)];}
-function resetMapView(){$('map').setAttribute('viewBox',`${fullMapView.x} ${fullMapView.y} ${fullMapView.width} ${fullMapView.height}`);$('zoomLevel').textContent='1.0×';}
+function mapZoom(){return fullMapView.width/$('map').viewBox.baseVal.width;}
+function updateMapCursor(){$('map').classList.toggle('panReady',mapZoom()>mapPanZoomThreshold);}
+function finishMapPan(e,cancelled=false){if(!mapPan)return;const pan=mapPan,map=$('map');mapPan=null;map.classList.remove('mapPanning');if(map.hasPointerCapture(pan.pointerId))map.releasePointerCapture(pan.pointerId);suppressMapClick=!cancelled&&pan.dragged;if(!cancelled&&pan.dragged&&!locked&&e){const p=mapPoint(e);if(M.inside(p)){position=p;state.selected=p.slice();render();}}}
+function resetMapView(){if(mapPan)finishMapPan(null,true);$('map').setAttribute('viewBox',`${fullMapView.x} ${fullMapView.y} ${fullMapView.width} ${fullMapView.height}`);$('zoomLevel').textContent='1.0×';updateMapCursor();}
 $('map').addEventListener('wheel',e=>{
  if(e.ctrlKey)return; // Preserve the browser's Ctrl+wheel accessibility zoom.
  e.preventDefault();
+ if(mapPan)return;
  const map=$('map'),v=map.viewBox.baseVal,anchor=mapCoordinates(e);
  const unit=e.deltaMode===1?16:e.deltaMode===2?map.clientHeight:1;
  const delta=Math.max(-120,Math.min(120,e.deltaY*unit));
@@ -44,10 +50,33 @@ $('map').addEventListener('wheel',e=>{
  const ratio=width/v.width,x=anchor.x+(v.x-anchor.x)*ratio,y=anchor.y+(v.y-anchor.y)*ratio;
  map.setAttribute('viewBox',`${x} ${y} ${width} ${v.height*ratio}`);
  $('zoomLevel').textContent=(fullMapView.width/width).toFixed(1)+'×';
+ updateMapCursor();
 },{passive:false});
 $('resetView').onclick=resetMapView;
-$('map').addEventListener('pointermove',e=>{if(locked||performance.now()-lastMove<60)return;lastMove=performance.now();let p=mapPoint(e);if(M.inside(p)){position=p;state.selected=p.slice();render();}});
-$('map').addEventListener('click',e=>{let p=mapPoint(e);if(!M.inside(p)){toast('当前点在海面，请选择陆地内的观察位置。');return;}position=p;locked=true;state.selected=p.slice();render();});
+$('map').addEventListener('pointerdown',e=>{
+ suppressMapClick=false;
+ if(e.pointerType!=='mouse'||e.button!==0||mapZoom()<=mapPanZoomThreshold)return;
+ const map=$('map'),v=map.viewBox.baseVal,inverse=map.getScreenCTM().inverse();
+ mapPan={pointerId:e.pointerId,startX:e.clientX,startY:e.clientY,origin:mapCoordinatesWith(e,inverse),inverse,view:{x:v.x,y:v.y,width:v.width,height:v.height},dragged:false};
+ map.setPointerCapture(e.pointerId);
+});
+$('map').addEventListener('pointermove',e=>{
+ if(mapPan&&mapPan.pointerId===e.pointerId){
+  const pan=mapPan,dx=e.clientX-pan.startX,dy=e.clientY-pan.startY;
+  if(!pan.dragged&&Math.hypot(dx,dy)<mapDragThreshold)return;
+  pan.dragged=true;$('map').classList.add('mapPanning');
+  const point=mapCoordinatesWith(e,pan.inverse),view=pan.view;
+  const x=Math.max(fullMapView.x,Math.min(fullMapView.x+fullMapView.width-view.width,view.x-(point.x-pan.origin.x)));
+  const y=Math.max(fullMapView.y,Math.min(fullMapView.y+fullMapView.height-view.height,view.y-(point.y-pan.origin.y)));
+  $('map').setAttribute('viewBox',`${x} ${y} ${view.width} ${view.height}`);
+  return;
+ }
+ if(locked||performance.now()-lastMove<60)return;lastMove=performance.now();let p=mapPoint(e);if(M.inside(p)){position=p;state.selected=p.slice();render();}
+});
+$('map').addEventListener('pointerup',e=>finishMapPan(e));
+$('map').addEventListener('pointercancel',e=>finishMapPan(e,true));
+$('map').addEventListener('lostpointercapture',e=>{if(mapPan&&mapPan.pointerId===e.pointerId)finishMapPan(e,true);});
+$('map').addEventListener('click',e=>{if(suppressMapClick){suppressMapClick=false;e.preventDefault();return;}let p=mapPoint(e);if(!M.inside(p)){toast('当前点在海面，请选择陆地内的观察位置。');return;}position=p;locked=true;state.selected=p.slice();render();});
 $('map').addEventListener('keydown',e=>{let d={ArrowUp:[0,1],ArrowRight:[1,0],ArrowDown:[0,-1],ArrowLeft:[-1,0]}[e.key];if(!d)return;e.preventDefault();let p=[position[0]+d[0],position[1]+d[1]];if(M.inside(p)){position=p;locked=true;state.selected=p.slice();render();}});
 $('unlock').onclick=()=>{locked=!locked;render();};document.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>{pause();step(Number(b.dataset.step));});
 $('play').onclick=()=>{if(timer){pause();return;}$('play').textContent='Ⅱ 暂停';timer=setInterval(()=>step(.25),1000);};document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
@@ -57,6 +86,6 @@ $('reset').onclick=()=>{if(!confirm('重置实验？请先保存需要保留的�
 $('save').onclick=()=>{state.selected=position.slice();let a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:'application/json'}));a.href=url;a.download='Olorua-观测存档-'+state.hour+'h.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
 $('load').onclick=()=>$('file').click();$('file').onchange=async e=>{let f=e.target.files[0];if(!f)return;if(f.size>2*1024*1024){toast('存档超过2MB，请检查文件。');return;}try{let obj=JSON.parse(await f.text());M.validate(obj);pause();state=obj;position=state.selected.slice();locked=true;render();toast('存档已载入。');}catch(err){toast('未载入：'+err.message);}e.target.value='';};
 $('help').onclick=()=>$('guide').showModal();$('closeHelp').onclick=()=>$('guide').close();$('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('roleText').textContent);toast('已复制角色观察文字。');}catch{toast('无法访问剪贴板，请手动选择并复制文字。');}};
-drawBase();render();
+drawBase();render();updateMapCursor();
 
 $('nextRain').onclick=()=>{pause();let target=null;for(let i=1;i<=24*60*4;i++){let h=state.hour+i*.25;if(M.weather(h,state.seed).rain>0&&M.weather(h-.25,state.seed).rain===0){target=Math.max(state.hour,h-.25);break;}}if(target!==null){if(target>state.hour)step(target-state.hour);toast('已到下一场雨进入东岸前；按+15分钟观察雨带向西推进。');}else toast('未来60天未找到新的降雨起点。');};
