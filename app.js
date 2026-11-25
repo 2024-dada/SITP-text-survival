@@ -102,3 +102,5 @@ $('help').onclick=()=>$('guide').showModal();$('closeHelp').onclick=()=>$('guide
 drawBase();render();updateMapCursor();
 
 $('nextRain').onclick=()=>{pause();let target=null;for(let i=1;i<=24*60*4;i++){let h=state.hour+i*.25;if(M.weather(h,state.seed).rain>0&&M.weather(h-.25,state.seed).rain===0){target=Math.max(state.hour,h-.25);break;}}if(target!==null){if(target>state.hour)step(target-state.hour);toast('已到下一场雨进入东岸前；按+15分钟观察雨带向西推进。');}else toast('未来60天未找到新的降雨起点。');};
+
+globalThis.IslandApp=Object.freeze({getWorldState:()=>state,getPosition:()=>position.slice(),pause,setWorldState(next,focusPosition){M.validate(next);if(focusPosition&&!M.inside(focusPosition))throw Error('求生者位置必须在岛上');const previousState=state,previousPosition=position.slice(),previousLocked=locked;pause();try{state=next;if(focusPosition){position=focusPosition.slice();locked=true;}state.selected=position.slice();render();}catch(error){state=previousState;position=previousPosition;locked=previousLocked;render();throw error;}}});

@@ -42,3 +42,49 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 
 .previewCard.previewKind-text{font-size:17px;line-height:1.9;padding:18px;border:1px solid #dbe4d4;border-radius:10px;background:#fffef9}
 .previewCard.previewKind-role{white-space:pre-wrap}
+
+/* Single-survivor AI experiment prototype */
+.survivalPanel{margin:18px 0;padding:18px 20px;border:1px solid #d9e1d2;background:#fbfcf8;}
+.survivalPanel .panelHead{align-items:flex-start;gap:16px;}
+.survivalPanel .panelHead h2{margin:0 0 5px;color:#294a3c;}
+.survivalPanel .panelHead small{display:block;color:#667a6e;line-height:1.5;}
+.simStatus{padding:6px 10px;border-radius:999px;background:#e7eee4;color:#45634e;white-space:nowrap;font-size:.9rem;}
+.simSetup,.actionComposer,.aiSettingsGrid{display:flex;align-items:end;gap:10px;flex-wrap:wrap;}
+.simSetup{margin:14px 0 10px;}
+.simSetup label,.actionComposer label,.aiSettingsGrid label{display:flex;flex-direction:column;gap:5px;color:#41594d;font-size:.9rem;}
+.simSetup input,.actionComposer select,.aiSettingsGrid input,.aiSettingsGrid select{min-height:38px;padding:7px 10px;border:1px solid #cdd7ca;border-radius:8px;background:#fff;color:#263e32;font:inherit;}
+#simSeed{width:170px;}
+.primaryAction{background:#315f4b!important;color:#fff!important;border-color:#315f4b!important;}
+.aiSettings{margin:10px 0;padding:10px 12px;border:1px solid #e0e6dc;border-radius:10px;background:#f4f7f0;}
+.aiSettings summary{cursor:pointer;font-weight:700;color:#365646;}
+.aiSettingsGrid{margin-top:12px;}
+.aiSettingsGrid label:first-child{flex:1 1 360px;}
+.aiSettingsGrid label:nth-child(2){flex:1 1 240px;}
+.aiSettingsGrid label:nth-child(3){flex:0 1 210px;}
+.aiSettingsGrid input{width:100%;box-sizing:border-box;}
+.aiSettingsGrid .rememberKeyLabel{flex:0 0 auto;align-self:center;}
+.aiSettingsGrid .rememberKeyLabel span{display:flex;align-items:center;gap:6px;white-space:nowrap;}
+.aiSettingsGrid .rememberKeyLabel input{width:auto;min-height:auto;}
+.aiSettingsGrid .modelChoiceLabel{flex:1 1 220px;}
+.aiPrivacy,.aiStatus,.simRuleNote{margin:8px 0 0;color:#65766b;font-size:.83rem;line-height:1.5;}
+.aiStatus{min-height:1.3em;}
+.aiStatus[data-kind="error"]{color:#a13e31;}
+.aiStatus[data-kind="ok"]{color:#2d6b45;}
+.simControls{margin-top:14px;padding-top:14px;border-top:1px solid #e0e6dc;}
+.simControls[hidden],.actionFields[hidden]{display:none!important;}
+.actionComposer{align-items:end;}
+.actionComposer>label:first-child{min-width:175px;}
+.actionFields{display:flex;align-items:end;gap:10px;flex-wrap:wrap;}
+.actionPreview{margin:10px 0 0;padding:9px 12px;border-radius:8px;background:#eef3e9;color:#425b4c;}
+.simRuleNote{margin:5px 0 14px;}
+.simLogHead{display:flex;justify-content:space-between;gap:12px;color:#355445;}
+.simLog{display:flex;flex-direction:column;gap:8px;max-height:360px;overflow:auto;margin-top:9px;padding:12px;border:1px solid #e2e7df;border-radius:10px;background:#fff;}
+.dialogueLine{padding:9px 11px;border-left:3px solid #9aa99a;background:#f8faf6;border-radius:0 8px 8px 0;}
+.dialogueLine[data-role="观测者"]{border-color:#527c61;background:#eef5ec;}
+.dialogueLine[data-role="岛屿端"]{border-color:#5186a2;}
+.dialogueLine[data-role="身体端"]{border-color:#9679a6;}
+.dialogueLine[data-role="系统"]{border-color:#aa8e58;}
+.dialogueSpeaker{display:block;margin-bottom:3px;color:#617468;font-size:.78rem;font-weight:700;}
+.dialogueText{white-space:pre-wrap;overflow-wrap:anywhere;color:#263b30;line-height:1.55;}
+.emptyLog{margin:0;color:#7b897e;}
+@media(max-width:720px){.survivalPanel{padding:14px}.simSetup>*{flex:1 1 100%}.simSetup button{flex:1 1 45%}.actionComposer>label:first-child{flex:1 1 100%}.actionFields{flex:1 1 100%}.actionFields label{flex:1 1 42%}.aiSettingsGrid label{flex:1 1 100%!important}.simLog{max-height:300px}}
