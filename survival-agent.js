@@ -43,8 +43,12 @@
   let visibleLines = 0;
   let roundActive = false;
   let roundCalls = 0;
-  let roundCallsLimit = 0;
+  let lastAgentRoundNumber = 0;
+  let lastAgentRoundState = '等待首次运行';
+  let lastAgentRoundError = '';
+  let lastAgentRoundResults = [];
   const apiKeyStorageName = 'olorua.sitp.model-api-key';
+  const apiProviderStorageName = 'olorua.sitp.model-api-provider';
 
   const survivorAgentRule = '你是本次实验中的求生者 agent。只依据已经提供的文字、事件和自身状态交流，不补造岛屿参数、生理数值或事实。你只能修改当前 system 自己的 parameters、statement、events 和 time_clock；每项状态修改都必须说明 reason。time_clock 只是你自己的标注，不会推进岛屿模拟时钟。可用 send_message 定向给一个或多个 agent，收件人表示希望谁回应；所有 agent 下一轮都会看到上一轮完整发言。每轮所有 agent 并行处理同一份开始状态，不能看到同轮其他 agent 的结果。';
 
@@ -74,6 +78,11 @@
   function status(text, kind) {
     el('aiStatus').textContent = text;
     el('aiStatus').dataset.kind = kind || '';
+    emitMonitorUpdate();
+  }
+
+  function emitMonitorUpdate() {
+    document.dispatchEvent(new Event('sitp:monitor-update'));
   }
 
   function saveRememberedKey() {
@@ -82,24 +91,41 @@
     try {
       if (key) localStorage.setItem(apiKeyStorageName, key);
       else localStorage.removeItem(apiKeyStorageName);
+      saveRememberedProvider();
     } catch {
       el('rememberApiKey').checked = false;
       status('浏览器不允许保存本机密钥；本次仍可在当前页面使用。', 'error');
     }
   }
 
+  function saveRememberedProvider() {
+    if (!el('rememberApiKey').checked) return;
+    try {
+      const provider = el('apiProvider').value;
+      if (provider === 'auto') localStorage.removeItem(apiProviderStorageName);
+      else localStorage.setItem(apiProviderStorageName, provider);
+    } catch {
+      // Provider preference is optional; a remembered API key remains usable this session.
+    }
+  }
+
   function handleRememberKeyChange() {
     if (el('rememberApiKey').checked) { saveRememberedKey(); return; }
-    try { localStorage.removeItem(apiKeyStorageName); }
+    try {
+      localStorage.removeItem(apiKeyStorageName);
+      localStorage.removeItem(apiProviderStorageName);
+    }
     catch { status('无法删除浏览器中已保存的Key；请在浏览器站点设置中清除此网页数据。', 'error'); }
   }
 
   function loadRememberedKey() {
     try {
       const key = localStorage.getItem(apiKeyStorageName);
+      const provider = localStorage.getItem(apiProviderStorageName);
       if (key) {
         el('aiApiKey').value = key;
         el('rememberApiKey').checked = true;
+        if (provider && ['deepseek', 'openai', 'openrouter', 'groq'].includes(provider)) el('apiProvider').value = provider;
       }
     } catch {
       status('浏览器不允许读取本机已保存的密钥；请重新输入。', 'error');
@@ -140,6 +166,7 @@
     const node = el('agentInteractionStatus');
     node.textContent = text;
     node.dataset.kind = kind || '';
+    emitMonitorUpdate();
   }
 
   function interactionAgentIds(frame) {
@@ -179,39 +206,6 @@
     el('endExperiment').hidden = !locked;
   }
 
-  function normalizeEndpoint(raw) {
-    let url;
-    try { url = new URL(raw.trim()); } catch { throw new Error('API 地址不是有效的网址。'); }
-    const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-    if (url.protocol !== 'https:' && !(local && url.protocol === 'http:')) throw new Error('API 地址必须使用 HTTPS；只有本机 localhost 可以用 HTTP。');
-    if (url.username || url.password) throw new Error('API 地址不能把账号或密钥写在网址里。');
-    url.hash = '';
-    url.search = '';
-    url.pathname = url.pathname.replace(/\/+$/, '');
-    if (!url.pathname.toLowerCase().endsWith('/chat/completions')) url.pathname += '/chat/completions';
-    return url.href;
-  }
-
-  function getConnection() {
-    const apiKey = el('aiApiKey').value.trim();
-    if (!apiKey) throw new Error('请先在“模型连接设置”中填写 API Key。');
-    const endpoint = normalizeEndpoint(el('aiEndpoint').value);
-    return { apiKey, endpoint };
-  }
-
-  function getSettings() {
-    const { apiKey, endpoint } = getConnection();
-    const model = el('aiModelName').value.trim();
-    if (!model) throw new Error('请填写模型名，或先获取模型列表再选择。');
-    return { apiKey, endpoint, model };
-  }
-
-  function modelsEndpoint(chatEndpoint) {
-    const url = new URL(chatEndpoint);
-    url.pathname = url.pathname.replace(/\/chat\/completions$/i, '/models');
-    return url.href;
-  }
-
   async function fetchWithTimeout(url, options, label) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 90000);
@@ -220,7 +214,7 @@
     } catch (error) {
       const roundNote = label === '模型调用' ? '此轮状态没有提交；可以重试同一轮。' : '可以稍后重试。';
       if (error.name === 'AbortError') throw new Error(label + '等待超过90秒，' + roundNote);
-      throw new Error(label + '网络连接失败。请检查网络、API 地址和服务商跨域设置；' + roundNote + '浏览器提示：' + error.message);
+      throw new Error(label + '网络连接失败。请检查网络和服务商跨域设置；' + roundNote + '浏览器提示：' + error.message);
     } finally {
       clearTimeout(timer);
     }
@@ -239,11 +233,11 @@
   }
 
   async function requestCompletion(settings, messages, tools, choice) {
-    if (roundActive && roundCalls >= roundCallsLimit) throw new Error('本轮模型请求达到框架系统数对应的上限；岛屿和身体状态均未提交。');
     if (roundActive) roundCalls += 1;
     modelCalls += 1;
     el('modelCallCount').textContent = String(modelCalls);
     el('agentModelCallCount').textContent = '模型请求 ' + modelCalls;
+    emitMonitorUpdate();
     const payload = {
       model: settings.model, messages, tools, tool_choice: choice, max_tokens: 1800, stream: false
     };
@@ -260,10 +254,118 @@
     return message;
   }
 
+  const providerEndpoints = {
+    deepseek: 'https://api.deepseek.com/chat/completions',
+    openai: 'https://api.openai.com/v1/chat/completions',
+    openrouter: 'https://openrouter.ai/api/v1/chat/completions',
+    groq: 'https://api.groq.com/openai/v1/chat/completions'
+  };
+  const providerNames = { deepseek: 'DeepSeek', openai: 'OpenAI', openrouter: 'OpenRouter', groq: 'Groq' };
+
+  function detectProviderFromKey(key) {
+    if (key.startsWith('sk-or-v1-')) return 'openrouter';
+    if (key.startsWith('gsk_')) return 'groq';
+    if (/^sk-(proj|svcacct)-/.test(key)) return 'openai';
+    return '';
+  }
+
+  function resolveProvider() {
+    const key = el('aiApiKey').value.trim();
+    const requested = el('apiProvider').value;
+    const provider = requested === 'auto' ? detectProviderFromKey(key) : requested;
+    if (!key) {
+      el('providerStatus').textContent = '填写 Key 后自动识别服务商并获取模型。';
+      emitMonitorUpdate();
+      return null;
+    }
+    if (!provider) {
+      el('providerStatus').textContent = 'Key 格式未能唯一识别。请选择服务商；无需填写 API 地址。';
+      emitMonitorUpdate();
+      return null;
+    }
+    const endpoint = providerEndpoints[provider];
+    if (!endpoint) {
+      el('providerStatus').textContent = '暂不支持该服务商。';
+      emitMonitorUpdate();
+      return null;
+    }
+    const recognition = requested === 'auto' ? '自动识别为 ' : '已选择 ';
+    el('providerStatus').textContent = recognition + providerNames[provider] + ' · 正在验证 Key 并读取模型';
+    emitMonitorUpdate();
+    return { provider, endpoint };
+  }
+
+  function getConnection() {
+    const apiKey = el('aiApiKey').value.trim();
+    if (!apiKey) throw new Error('请先填写 API Key。');
+    const resolved = resolveProvider();
+    if (!resolved) throw new Error('无法自动识别此 Key；请选择服务商后重试，无需填写 API 地址。');
+    return { apiKey, ...resolved };
+  }
+
+  function getSettings() {
+    const connection = getConnection();
+    const model = el('aiModelName').value.trim();
+    if (!model) throw new Error('请填写模型名，或先获取模型列表再选择。');
+    return { ...connection, model };
+  }
+
+  function modelsEndpoint(chatEndpoint) {
+    const url = new URL(chatEndpoint);
+    url.pathname = url.pathname.replace(/\/chat\/completions$/i, '/models');
+    return url.href;
+  }
+
+  async function connectFromKey() {
+    saveRememberedProvider();
+    if (!resolveProvider()) {
+      modelQuery += 1;
+      balanceQuery += 1;
+      el('aiModelChoices').replaceChildren(new Option('识别服务商后获取模型', ''));
+      el('apiBalance').textContent = '选择服务商并验证 Key 后查询余额；目前只支持 DeepSeek 官方 API。';
+      el('refreshBalance').disabled = false;
+      emitMonitorUpdate();
+      return;
+    }
+    await Promise.allSettled([discoverModels(), refreshBalance()]);
+  }
+
+  let balanceQuery = 0;
+  let modelQuery = 0;
+  async function refreshBalance() {
+    const query = ++balanceQuery;
+    const output = el('apiBalance');
+    const button = el('refreshBalance');
+    output.textContent = '正在查询余额…';
+    button.disabled = true;
+    emitMonitorUpdate();
+    try {
+      const settings = getConnection();
+      const endpoint = new URL(settings.endpoint);
+      if (endpoint.hostname !== 'api.deepseek.com') throw new Error('当前服务暂不支持余额查询；目前支持 DeepSeek 官方 API。');
+      const response = await fetchWithTimeout(new URL('/user/balance', endpoint).href, {
+        method: 'GET', headers: { Authorization: 'Bearer ' + settings.apiKey }
+      }, '余额查询');
+      const data = await responseJson(response, settings.apiKey, '余额查询');
+      if (!Array.isArray(data.balance_infos) || !data.balance_infos.length) throw new Error('服务未返回余额信息。');
+      if (query !== balanceQuery) return;
+      output.textContent = data.balance_infos.map(item => item.currency + ' ' + item.total_balance + '（赠送 ' + item.granted_balance + '，充值 ' + item.topped_up_balance + '）').join('；') + (data.is_available ? ' · 可用' : ' · 余额不足') + ' · ' + new Date().toLocaleTimeString();
+    } catch (error) {
+      if (query === balanceQuery) output.textContent = error.message;
+    } finally {
+      if (query === balanceQuery) {
+        button.disabled = false;
+        emitMonitorUpdate();
+      }
+    }
+  }
+
   async function discoverModels() {
     if (busy) return;
+    const query = ++modelQuery;
     const select = el('aiModelChoices');
     select.replaceChildren(new Option('正在获取模型…', ''));
+    emitMonitorUpdate();
     try {
       const settings = getConnection();
       status('正在读取模型列表……');
@@ -271,16 +373,26 @@
         method: 'GET', headers: { Authorization: 'Bearer ' + settings.apiKey }
       }, '模型列表读取');
       const data = await responseJson(response, settings.apiKey, '模型列表读取');
+      if (query !== modelQuery) return;
       if (!Array.isArray(data.data)) throw new Error('返回格式里没有模型列表字段 data。请手动输入模型名。');
       select.replaceChildren(new Option('请选择模型', ''));
       data.data.forEach(item => {
         if (typeof item.id !== 'string' || !item.id) return;
         select.append(new Option(item.name ? item.name + '（' + item.id + '）' : item.id, item.id));
       });
+      if (select.options.length > 1) {
+        const preferred = [...select.options].find(option => option.value === el('aiModelName').value) || [...select.options].find(option => /deepseek-flash|gpt-4.1-mini|llama-3.3-70b/.test(option.value)) || select.options[1];
+        select.value = preferred.value;
+        el('aiModelName').value = preferred.value;
+        el('providerStatus').textContent = '已连接 ' + providerNames[settings.provider] + ' · ' + (select.options.length - 1) + ' 个可选模型';
+      }
       status('读到 ' + (select.options.length - 1) + ' 个模型。列表不代表当前 Key 一定有调用权限。', 'ok');
     } catch (error) {
+      if (query !== modelQuery) return;
       select.replaceChildren(new Option('未获取到模型，可手动填写', ''));
       status(error.message + ' 仍可手动填写模型名。', 'error');
+    } finally {
+      emitMonitorUpdate();
     }
   }
 
@@ -598,7 +710,6 @@
     setBusy(true);
     roundActive = true;
     roundCalls = 0;
-    roundCallsLimit = 1 + R.MAX_TOOL_ROUNDS * session.body.systems.length;
     setSimulationStatus('双方处理中 · 模拟时间暂停');
     let committed = false;
     try {
@@ -683,7 +794,13 @@
   }
 
   function displayAgentName(systemId) {
-    return systemId === 'survivor_agent' ? '求生者 Agent' : String(systemId);
+    const labels = {
+      survivor_agent: '求生者 Agent',
+      A_geography_observation: 'A · 地理与空间观测 Agent',
+      B_time_weather: 'B · 时间与天气 Agent',
+      C_resources_ecology: 'C · 资源、水账与生态 Agent'
+    };
+    return labels[systemId] || String(systemId);
   }
 
   function auditValue(value) {
@@ -798,8 +915,9 @@
     setBusy(true);
     roundActive = true;
     roundCalls = 0;
-    roundCallsLimit = active.frame.systems.length * R.MAX_TOOL_ROUNDS;
     const roundNumber = active.round + 1;
+    lastAgentRoundState = '第 ' + roundNumber + ' 轮并行推理中';
+    lastAgentRoundError = '';
     setAgentStatus('第 ' + roundNumber + ' 轮并行推理中', '');
     el('agentFailurePanel').hidden = true;
     try {
@@ -815,18 +933,29 @@
       );
       active.frame = inference.frame;
       active.round = roundNumber;
+      lastAgentRoundNumber = roundNumber;
+      lastAgentRoundState = '第 ' + roundNumber + ' 轮已提交';
+      lastAgentRoundResults = inference.results.map(result => ({
+        systemId: result.systemId,
+        toolCount: result.toolTrace.length,
+        toolNames: [...new Set(result.toolTrace.map(item => item.name))]
+      }));
       active.frameworkCommandLog.push(...inference.commandLog.map(cloneJson));
       active.previousRoundMessages = messagesForNextRound(researcherPrompt, researcherRecipients, inference);
       active.retryPrompt = null;
       active.retryRecipients = [];
       appendAgentRound(roundNumber, researcherPrompt, inference);
       el('agentRoundCount').textContent = String(active.round);
+      refreshBalance();
       renderFramework();
       setAgentStatus('第 ' + roundNumber + ' 轮已提交 · 岛屿时钟未推进', 'ok');
       status('Agent 第 ' + roundNumber + ' 轮已完成。所有状态变化均限于所属 system，并记录了理由。', 'ok');
     } catch (error) {
       active.retryPrompt = researcherPrompt;
       active.retryRecipients = researcherRecipients;
+      lastAgentRoundState = '第 ' + roundNumber + ' 轮失败 · 等待重试';
+      lastAgentRoundError = error.message || String(error);
+      lastAgentRoundResults = [];
       el('agentFailureText').textContent = (error.message || String(error)) + '\n\n本轮未提交任何 agent 状态；岛屿演示时钟也未推进。可以重试相同任务，或结束会话后重新开始。';
       el('agentFailurePanel').hidden = false;
       setAgentStatus('第 ' + roundNumber + ' 轮失败 · 状态未提交', 'error');
@@ -844,6 +973,11 @@
     if (!confirm('结束并重置会话会清除本次 Agent 对话和状态修改；载入的原始 JSON 会保留。确定继续吗？')) return;
     interactionSession = null;
     modelCalls = 0;
+    roundCalls = 0;
+    lastAgentRoundNumber = 0;
+    lastAgentRoundState = '等待首次运行';
+    lastAgentRoundError = '';
+    lastAgentRoundResults = [];
     el('modelCallCount').textContent = '0';
     el('agentModelCallCount').textContent = '模型请求 0';
     el('agentRoundCount').textContent = '0';
@@ -923,6 +1057,7 @@
     const node = el('frameworkStatus');
     node.textContent = text;
     node.dataset.kind = kind || '';
+    emitMonitorUpdate();
   }
 
   function updateFrameworkControls() {
@@ -988,6 +1123,7 @@
       el('frameworkState').textContent = '没有有效框架。';
       renderAgentRoster(null);
       renderFrameworkReplay();
+      emitMonitorUpdate();
       return;
     }
     el('frameworkSummary').textContent = frame.name + ' · ' + frame.systems.length + ' 个系统';
@@ -1004,6 +1140,66 @@
       'ok'
     );
     renderFrameworkReplay();
+    emitMonitorUpdate();
+  }
+
+  function getMonitorSnapshot() {
+    const frame = interactionSession ? interactionSession.frame : session ? session.body : selectedFramework;
+    const commandLog = interactionSession ? interactionSession.frameworkCommandLog : session && Array.isArray(session.frameworkCommandLog) ? session.frameworkCommandLog : [];
+    const systems = frame ? frame.systems.map(system => ({
+      systemId: system.system_id,
+      displayName: displayAgentName(system.system_id),
+      timeClock: system.time_clock,
+      statement: String(system.statement || '').slice(0, 500),
+      eventCount: Array.isArray(system.events) ? system.events.length : 0,
+      parameters: Array.isArray(system.parameters) ? system.parameters.map(parameter => ({
+        code: String(parameter.param || '未命名参数'),
+        value: parameter.value
+      })) : [],
+      changeCount: commandLog.filter(command => command.system_id === system.system_id && command.change).length
+    })) : [];
+    if (!session && frame && !systems.some(system => system.systemId === 'survivor_agent')) {
+      systems.unshift({
+        systemId: 'survivor_agent', displayName: displayAgentName('survivor_agent'), timeClock: 0,
+        statement: '首轮运行时自动接入；当前没有预置身体参数。', eventCount: 0, parameters: [], changeCount: 0,
+        waitingForStart: !interactionSession
+      });
+    }
+    const key = el('aiApiKey').value.trim();
+    const selectedProvider = el('apiProvider').value;
+    const detectedProvider = selectedProvider === 'auto' ? detectProviderFromKey(key) : selectedProvider;
+    const providerLabel = detectedProvider ? providerNames[detectedProvider] : selectedProvider === 'auto' ? '未识别' : '不支持';
+    const modelSelect = el('aiModelChoices');
+    const modelCount = [...modelSelect.options].filter(option => option.value).length;
+    return {
+      source: interactionSession ? '本次 Agent 会话' : session ? '本次单人生存实验' : selectedFrameworkFile,
+      systems,
+      lastResults: lastAgentRoundResults,
+      run: {
+        state: lastAgentRoundState,
+        error: lastAgentRoundError,
+        round: interactionSession ? interactionSession.round : session ? session.round : lastAgentRoundNumber,
+        running: busy && roundActive,
+        pendingRetry: Boolean(interactionSession && interactionSession.retryPrompt !== null),
+        modelCalls,
+        roundCalls,
+        commandCount: commandLog.length,
+        maxToolRounds: R.MAX_TOOL_ROUNDS === Infinity ? '无固定上限' : R.MAX_TOOL_ROUNDS,
+        maxSystems: R.MAX_SYSTEMS,
+        timeDelta: frame ? frame.framework_param.time_delta : '未载入',
+        realTimeDelta: frame ? frame.framework_param.real_time_delta : '未载入'
+      },
+      model: {
+        provider: providerLabel,
+        providerSelection: selectedProvider === 'auto' ? '自动识别' : '手动选择',
+        apiKeyConfigured: Boolean(key),
+        rememberKey: el('rememberApiKey').checked,
+        modelName: el('aiModelName').value.trim() || '未选择',
+        modelCount,
+        providerStatus: el('providerStatus').textContent,
+        balance: el('apiBalance').textContent
+      }
+    };
   }
 
   function safeFilename(value) {
@@ -1120,6 +1316,7 @@
     if (session) refreshOptions();
   }
 
+  el('refreshBalance').addEventListener('click', refreshBalance);
   el('discoverModels').addEventListener('click', discoverModels);
   el('frameworkFile').addEventListener('change', loadFrameworkFile);
   el('applyFrameworkEditor').addEventListener('click', applyFrameworkEditor);
@@ -1127,11 +1324,15 @@
   el('exportFrameworkLog').addEventListener('click', exportFrameworkLog);
   el('frameworkReplayIndex').addEventListener('input', renderFrameworkReplay);
   el('exportReplaySnapshot').addEventListener('click', exportReplaySnapshot);
-  el('aiApiKey').addEventListener('input', saveRememberedKey);
-  el('aiApiKey').addEventListener('change', () => { if (el('aiApiKey').value.trim()) discoverModels(); });
-  el('aiEndpoint').addEventListener('change', () => { if (el('aiApiKey').value.trim()) discoverModels(); });
-  el('rememberApiKey').addEventListener('change', handleRememberKeyChange);
-  el('aiModelChoices').addEventListener('change', event => { if (event.target.value) el('aiModelName').value = event.target.value; });
+  el('aiApiKey').addEventListener('input', () => { saveRememberedKey(); resolveProvider(); emitMonitorUpdate(); });
+  el('aiApiKey').addEventListener('change', connectFromKey);
+  el('apiProvider').addEventListener('change', connectFromKey);
+  el('rememberApiKey').addEventListener('change', () => { handleRememberKeyChange(); emitMonitorUpdate(); });
+  el('aiModelChoices').addEventListener('change', event => {
+    if (event.target.value) el('aiModelName').value = event.target.value;
+    emitMonitorUpdate();
+  });
+  el('aiModelName').addEventListener('input', emitMonitorUpdate);
   el('randomSeed').addEventListener('click', randomSeed);
   el('startExperiment').addEventListener('click', startExperiment);
   el('endExperiment').addEventListener('click', endExperiment);
@@ -1153,10 +1354,10 @@
   renderFramework();
   loadBundledAgentFramework();
   loadRememberedKey();
-  if (el('aiApiKey').value.trim()) discoverModels();
+  if (el('aiApiKey').value.trim()) connectFromKey();
   updateActionFields();
   updateAgentInteractionControls();
   keepIslandObserverReadOnly();
-  G.SurvivalAgent = Object.freeze({ refreshAfterIslandRender });
+  G.SurvivalAgent = Object.freeze({ refreshAfterIslandRender, getMonitorSnapshot });
   new MutationObserver(refreshAfterIslandRender).observe(el('nearby'), { childList: true });
 })(globalThis);

@@ -177,3 +177,32 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 .dialogueText{white-space:pre-wrap;overflow-wrap:anywhere;color:#263b30;line-height:1.55;}
 .emptyLog{margin:0;color:#7b897e;}
 @media(max-width:720px){.survivalPanel{padding:14px}.simSetup>*{flex:1 1 100%}.simSetup button{flex:1 1 45%}.actionComposer>label:first-child{flex:1 1 100%}.actionFields{flex:1 1 100%}.actionFields label{flex:1 1 42%}.aiSettingsGrid label{flex:1 1 100%!important}.frameworkToolbar>*{flex:1 1 100%}.frameworkToolbar button{width:100%}.simLog{max-height:300px}}
+
+/* Live parameter monitor, grouped by the systems currently loaded in the framework. */
+.parameterMonitor{margin-top:22px;border:1px solid #d9e1d2;border-radius:10px;background:#fbfcf8;overflow:hidden}
+.parameterMonitor>.panelHead{align-items:flex-start}
+.parameterMonitor>.panelHead small{display:block;margin-top:6px;color:#718174;font-size:11px;line-height:1.5}
+#monitorUpdated{padding:5px 8px;border-radius:999px;background:#edf2e9;color:#718174;font-size:10px;white-space:nowrap}
+.monitorGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:14px}
+.monitorCard{min-width:0;padding:13px;border:1px solid #dfe6da;border-radius:9px;background:#fff}
+.monitorCardHeading{display:flex;justify-content:space-between;align-items:flex-start;gap:9px;margin-bottom:10px}
+.monitorAgentTitle{min-width:0}
+.monitorAgentTitle h3{margin:0 0 4px;color:#375643;font-size:13px;line-height:1.45}
+.monitorAgentTitle code{display:block;color:#849083;font:10px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}
+.monitorStatus{flex:none;padding:4px 7px;border-radius:999px;background:#edf2e9;color:#637764;font-size:9px;text-align:center}
+.monitorAgentSummary,.monitorPlatformFields{display:grid;gap:5px}
+.monitorFieldRow{display:grid;grid-template-columns:minmax(90px,.8fr) minmax(0,1.15fr) minmax(64px,.9fr);align-items:start;gap:7px;padding:6px 7px;border-radius:6px;background:#f5f7f2;min-width:0}
+.monitorFieldLabel{color:#657665;font-size:10px;line-height:1.5}
+.monitorFieldCode{color:#77847a;font:9px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}
+.monitorFieldValue{color:#334c3b;font-size:10px;font-weight:600;line-height:1.5;text-align:right;overflow-wrap:anywhere}
+.monitorDetails{margin-top:9px;border:1px solid #e4e9e0;border-radius:7px;background:#fafbf8}
+.monitorDetails>summary{padding:8px 9px;cursor:pointer;color:#47624d;font-size:10px;font-weight:600}
+.monitorFieldList{display:grid;gap:3px;max-height:340px;overflow:auto;padding:0 6px 7px;overscroll-behavior:contain}
+.monitorFieldList .monitorFieldRow{grid-template-columns:minmax(100px,1fr) minmax(0,1.15fr) minmax(68px,.75fr);border-bottom:1px solid #e8ede5;border-radius:0;background:transparent}
+.monitorEmpty,.monitorStatementText,.monitorRunError{margin:0;padding:8px 10px;color:#718174;font-size:10px;line-height:1.65;overflow-wrap:anywhere}
+.monitorStatement{margin-top:7px}
+.monitorStatementText{white-space:pre-wrap;max-height:180px;overflow:auto}
+.monitorRunError{margin-top:8px;border-left:3px solid #b96b5c;background:#fbefeb;color:#8f4438}
+.monitorEmptyCard{display:flex;align-items:center;min-height:120px;color:#748475;font-size:11px;line-height:1.7}
+@media(max-width:1050px){.monitorGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:650px){.monitorGrid{grid-template-columns:minmax(0,1fr);padding:9px}.monitorCard{padding:11px}.parameterMonitor>.panelHead{gap:8px;padding:13px}.monitorFieldRow{grid-template-columns:minmax(76px,.8fr) minmax(0,1.15fr) minmax(56px,.75fr);gap:5px}.monitorFieldList .monitorFieldRow{grid-template-columns:minmax(85px,.9fr) minmax(0,1.15fr) minmax(52px,.75fr)}#monitorUpdated{font-size:9px}}
