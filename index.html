@@ -1,4 +1,4 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SITP · Agent 交互实验</title><link rel="stylesheet" href="style.css?v=4.2.4"><script defer src="data.js?v=3.3.2"></script><script defer src="model.js?v=4.0.0"></script><script defer src="observation.js?v=3.3.2"></script><script defer src="app.js?v=4.0.0"></script><script defer src="body-framework.js?v=4.0.0"></script><script defer src="framework-runtime.js?v=4.2.4"></script><script defer src="survival-agent.js?v=4.2.4"></script></head><body>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SITP · Agent 交互实验</title><link rel="stylesheet" href="style.css?v=4.3.0"><script defer src="data.js?v=3.3.2"></script><script defer src="model.js?v=4.0.0"></script><script defer src="observation.js?v=3.3.2"></script><script defer src="app.js?v=4.0.0"></script><script defer src="body-framework.js?v=4.0.0"></script><script defer src="framework-runtime.js?v=4.3.0"></script><script defer src="survival-agent.js?v=4.3.0"></script><script defer src="monitor.js?v=4.3.0"></script></head><body>
 <header><a class="brand" href="./"><span>◈</span><div>OLORUA<small>SITP · 文本生存 / 岛屿建模</small></div></a><div class="headRight"><span class="badge">Agent 逐轮交互</span><button id="help">使用说明</button><a href="https://github.com/2024-dada/SITP-text-survival" target="_blank" rel="noopener">GitHub ↗</a></div></header>
 <main><section class="intro"><div><div class="eyebrow">OLORUA AGENT WORKBENCH / 对话实验</div><h1>让求生者与岛屿 agent 对话。</h1><p>手动逐轮运行 · 同轮并行 · 状态变更附理由 · A/B/C 参数参考 Agent</p></div><div class="introNote">网站已附带本次提供的 A/B/C 参数参考框架并自动载入。模拟设定、缺失项和待组长确认状态照原样保留，不代表本岛实测；可在侧栏换载其他 Olorua JSON。</div></section>
 <div class="agentWorkbench">
@@ -32,8 +32,8 @@
     <div class="aiSettingsGrid">
       <label>API Key <input id="aiApiKey" type="password" autocomplete="off" placeholder="粘贴自己的 API Key"></label>
       <p id="providerStatus" role="status">填写 Key 后识别服务商并获取模型。</p>
-      <label>服务商 <select id="apiProvider"><option value="auto">自动识别</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="groq">Groq</option><option value="custom">其他兼容服务</option></select></label>
-      <details><summary>高级设置：API 地址与模型名</summary><label>API 地址 <input id="aiEndpoint" type="url" value="" autocomplete="url"></label><label>手动模型名 <input id="aiModelName" type="text" value="" autocomplete="off"></label></details>
+      <details><summary>服务商选项 · 自动识别失败时选择</summary><label>服务商 <select id="apiProvider"><option value="auto">自动识别</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="groq">Groq</option></select></label></details>
+      <details><summary>高级设置：手动模型名</summary><label>手动模型名 <input id="aiModelName" type="text" value="" autocomplete="off"></label></details>
       <label class="rememberKeyLabel"><span><input id="rememberApiKey" type="checkbox"> 记住Key</span></label>
       <button id="discoverModels" type="button">获取可选模型</button>
       <div><button id="refreshBalance" type="button">刷新 API 余额</button><p id="apiBalance" role="status">尚未查询余额 · 支持 DeepSeek 官方 API</p></div>
@@ -92,6 +92,10 @@
 </div>
 </details>
 </div>
+<section class="parameterMonitor" aria-labelledby="parameterMonitorHeading">
+  <div class="panelHead"><div><h2 id="parameterMonitorHeading">参数显示监控平台</h2><small>按当前真实 Agent 分组；中文释义、代码参数名和实时状态同时显示。</small></div><span id="monitorUpdated" aria-live="polite">等待载入 Agent</span></div>
+  <div id="parameterMonitorCards" class="monitorGrid"></div>
+</section>
 <footer><span>数据参考：OSM岸线 · FMS Lakeba温雨 · GLO90高程采样</span><span>静态页面 · 生存实验通过浏览器直连模型API · 身体示例不代表临床数据 / 观测算法 obs-dir-v4</span></footer></main>
 <dialog id="guide"><h2>Agent 文本交互</h2><p>网站默认附带并自动载入 A/B/C 参数参考框架；展开右侧“参数观测与岛屿视图”配置模型服务，也可换载其他 Olorua JSON systems。框架中的模拟设定和待确认项不代表本岛实测，也不会把内置身体示例当成岛屿数据。JSON 中每个 system 成为一个岛屿 agent；网站另接入一个无预置参数的求生者 agent。</p><p>每次由你点“运行一轮”。同一轮所有 agent 并行读取相同起始状态和上一轮完整对话；本轮结束后，下一轮才互相看到本轮发言。可选填一句任务，任务发送给全体；所有已载入 agent 每轮都会参与，不能单独关闭。只要一个 agent 失败，本轮状态就不提交，可重试同一轮。</p><p>agent 可以读取其他系统，但只能修改自己的参数、说明、事件队列和 time_clock 标注；每项状态变化都要求说明理由，并在聊天记录里显示修改前后。time_clock 标注不会推进岛屿模拟时钟。工具调用和错误收在可展开详情里。</p><p>右侧观测栏包含旧地图、天气、资源和水量演示信息，当前为只读。这里的地图与模拟参数不是待载入的岛屿组 JSON，也不能当成 Olorua 实测值。</p><button id="closeHelp">知道了</button></dialog>
 <dialog id="textPreview" class="textPreview" aria-labelledby="textPreviewHeading"><div class="previewShell"><div class="previewTop"><div><h2 id="textPreviewHeading">文字放大预览</h2><span id="textPreviewZoom" aria-live="polite">100%</span></div><button id="closeTextPreview" type="button">关闭</button></div><div id="textPreviewStage" class="previewStage"><div id="textPreviewBody" class="previewBody"></div></div><p class="previewHint">滚轮以预览卡片中心缩放 · 点击卡片外关闭 · 内容取打开时刻</p></div></dialog></body></html>
