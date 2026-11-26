@@ -126,12 +126,13 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 .aiSettings summary{cursor:pointer;font-weight:700;color:#365646;}
 .aiSettingsGrid{margin-top:12px;}
 .aiSettingsGrid label:first-child{flex:1 1 360px;}
-.aiSettingsGrid label:nth-child(2){flex:1 1 240px;}
-.aiSettingsGrid label:nth-child(3){flex:0 1 210px;}
+.aiSettingsGrid .providerSelectLabel{flex:1 1 240px;}
+.aiSettingsGrid .baseUrlLabel{flex:0 1 210px;}
 .aiSettingsGrid input{width:100%;box-sizing:border-box;}
-.aiSettingsGrid .rememberKeyLabel{flex:0 0 auto;align-self:center;}
-.aiSettingsGrid .rememberKeyLabel span{display:flex;align-items:center;gap:6px;white-space:nowrap;}
-.aiSettingsGrid .rememberKeyLabel input{width:auto;min-height:auto;}
+.aiSettingsGrid .rememberKeyLabel,.aiSettingsGrid .tongjiProviderLabel{flex:0 0 auto;align-self:center;}
+.aiSettingsGrid .rememberKeyLabel span,.aiSettingsGrid .tongjiProviderLabel span{display:flex;align-items:center;gap:6px;white-space:nowrap;}
+.aiSettingsGrid .rememberKeyLabel input,.aiSettingsGrid .tongjiProviderLabel input{width:auto;min-height:auto;}
+.aiSettingsGrid .tongjiProviderLabel small{display:block;margin-top:3px;color:#65766b;font-size:.75rem;line-height:1.35;}
 .aiSettingsGrid .modelChoiceLabel{flex:1 1 220px;}
 .aiPrivacy,.aiStatus,.simRuleNote{margin:8px 0 0;color:#65766b;font-size:.83rem;line-height:1.5;}
 .aiStatus{min-height:1.3em;}

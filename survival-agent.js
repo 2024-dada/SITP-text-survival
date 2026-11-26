@@ -50,6 +50,7 @@
   const apiKeyStorageName = 'olorua.sitp.model-api-key';
   const apiBaseUrlStorageName = 'olorua.sitp.model-api-base-url';
   const apiModelStorageName = 'olorua.sitp.model-api-model';
+  const apiProviderStorageName = 'olorua.sitp.model-api-preset';
 
   const survivorAgentRule = '你是本次实验中的求生者 agent。只依据已经提供的文字、事件和自身状态交流，不补造岛屿参数、生理数值或事实。你只能修改当前 system 自己的 parameters、statement、events 和 time_clock；每项状态修改都必须说明 reason。time_clock 只是你自己的标注，不会推进岛屿模拟时钟。可用 send_message 定向给一个或多个 agent，收件人表示希望谁回应；所有 agent 下一轮都会看到上一轮完整发言。每轮所有 agent 并行处理同一份开始状态，不能看到同轮其他 agent 的结果。';
 
@@ -104,6 +105,8 @@
     try {
       const baseUrl = el('aiBaseUrl').value.trim();
       const model = el('aiModelName').value.trim();
+      const provider = el('tongjiProvider').checked ? 'tongji' : el('aiProvider').value;
+      localStorage.setItem(apiProviderStorageName, provider);
       if (baseUrl) localStorage.setItem(apiBaseUrlStorageName, baseUrl);
       else localStorage.removeItem(apiBaseUrlStorageName);
       if (model) localStorage.setItem(apiModelStorageName, model);
@@ -119,6 +122,7 @@
       localStorage.removeItem(apiKeyStorageName);
       localStorage.removeItem(apiBaseUrlStorageName);
       localStorage.removeItem(apiModelStorageName);
+      localStorage.removeItem(apiProviderStorageName);
     }
     catch { status('无法删除浏览器中已保存的Key；请在浏览器站点设置中清除此网页数据。', 'error'); }
   }
@@ -130,6 +134,9 @@
         el('aiApiKey').value = key;
         el('aiBaseUrl').value = localStorage.getItem(apiBaseUrlStorageName) || '';
         el('aiModelName').value = localStorage.getItem(apiModelStorageName) || '';
+        const preset = localStorage.getItem(apiProviderStorageName);
+        if (preset === 'tongji') el('tongjiProvider').checked = true;
+        else if ([...el('aiProvider').options].some(option => option.value === preset)) el('aiProvider').value = preset;
         el('rememberApiKey').checked = true;
       }
       localStorage.removeItem('olorua.sitp.model-api-provider');
@@ -308,6 +315,39 @@
     return url.href;
   }
 
+  const providerPresets = {
+    modelgo: { name: 'ModelGo', url: 'https://api.modelgo.ai/v1', pattern: /^mgk_\S+$/ },
+    openrouter: { name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', pattern: /^sk-or-v1-\S+$/ },
+    groq: { name: 'Groq', url: 'https://api.groq.com/openai/v1', pattern: /^gsk_\S+$/ },
+    openai: { name: 'OpenAI', url: 'https://api.openai.com/v1' },
+    deepseek: { name: 'DeepSeek', url: 'https://api.deepseek.com' },
+    tongji: { name: '同济大学 AGI', url: 'https://agi.tongji.edu.cn/v1' }
+  };
+  let modelDiscoveryTimer;
+  function detectedProvider(key) { return Object.values(providerPresets).find(provider => provider.pattern && provider.pattern.test(key)); }
+  function chosenProvider(key) {
+    const choice = el('tongjiProvider').checked ? 'tongji' : el('aiProvider').value;
+    return choice === 'auto' ? detectedProvider(key) : providerPresets[choice];
+  }
+
+  function prepareAutomaticConnection(keyChanged = false, providerChanged = false) {
+    clearTimeout(modelDiscoveryTimer);
+    const key = el('aiApiKey').value.trim();
+    const provider = chosenProvider(key);
+    if (keyChanged || providerChanged) {
+      el('aiModelName').value = '';
+      if (provider) el('aiBaseUrl').value = provider.url;
+      else if (el('aiProvider').value === 'auto' || providerChanged) el('aiBaseUrl').value = '';
+    } else if (provider && !el('aiBaseUrl').value.trim()) {
+      el('aiBaseUrl').value = provider.url;
+    }
+    saveRememberedConnection();
+    updateConnectionStatus();
+    if (key && provider && el('aiBaseUrl').value.trim() === provider.url) {
+      modelDiscoveryTimer = setTimeout(discoverModels, 900);
+    }
+  }
+
   function resolveConnection() {
     const key = el('aiApiKey').value.trim();
     const baseUrl = el('aiBaseUrl').value.trim();
@@ -317,16 +357,20 @@
       return null;
     }
     if (!baseUrl) {
-      el('providerStatus').textContent = '请填写服务商提供的 Base URL；系统不会根据 Key 前缀猜地址。';
+      el('providerStatus').textContent = el('tongjiProvider').checked
+        ? '已选择同济大学 AGI；请检查官方 Base URL。'
+        : 'Key 前缀无法唯一识别服务商；请选择服务商，或填写官方 Base URL。';
       emitMonitorUpdate();
       return null;
     }
     try {
       const endpoint = chatCompletionsEndpoint(baseUrl);
       const host = new URL(endpoint).host;
-      el('providerStatus').textContent = '自定义服务 · ' + host + ' · Key 仅在测试、余额查询或模型调用时发送到此主机。';
+      const preset = chosenProvider(key);
+      const provider = preset && baseUrl === preset.url ? preset.name : host;
+      el('providerStatus').textContent = provider + ' · ' + host + ' · Key 仅发送到此主机。';
       emitMonitorUpdate();
-      return { provider: host, endpoint };
+      return { provider, endpoint };
     } catch (error) {
       el('providerStatus').textContent = error.message || String(error);
       emitMonitorUpdate();
@@ -335,6 +379,7 @@
   }
 
   function updateConnectionStatus() {
+    clearTimeout(modelDiscoveryTimer);
     modelQuery += 1;
     el('aiModelChoices').replaceChildren(new Option('请测试此地址或手动填写模型名', ''));
     resolveConnection();
@@ -410,6 +455,7 @@
   }
 
   async function discoverModels() {
+    clearTimeout(modelDiscoveryTimer);
     if (busy) return;
     const query = ++modelQuery;
     const select = el('aiModelChoices');
@@ -434,6 +480,7 @@
         const preferred = [...select.options].find(option => option.value === el('aiModelName').value) || select.options[1];
         select.value = preferred.value;
         if (!el('aiModelName').value.trim()) el('aiModelName').value = preferred.value;
+        saveRememberedConnection();
         el('providerStatus').textContent = '已连接 ' + settings.provider + ' · 读取到 ' + (select.options.length - 1) + ' 个模型';
       }
       status('读到 ' + (select.options.length - 1) + ' 个模型。列表不代表当前 Key 一定有调用权限。', 'ok');
@@ -1378,9 +1425,17 @@
   el('exportFrameworkLog').addEventListener('click', exportFrameworkLog);
   el('frameworkReplayIndex').addEventListener('input', renderFrameworkReplay);
   el('exportReplaySnapshot').addEventListener('click', exportReplaySnapshot);
-  el('aiApiKey').addEventListener('input', () => { saveRememberedKey(); updateConnectionStatus(); });
+  el('aiApiKey').addEventListener('input', () => { saveRememberedKey(); prepareAutomaticConnection(true); });
   el('aiApiKey').addEventListener('change', saveRememberedKey);
-  el('aiBaseUrl').addEventListener('input', () => { saveRememberedConnection(); updateConnectionStatus(); });
+  el('aiProvider').addEventListener('change', () => {
+    el('tongjiProvider').checked = false;
+    prepareAutomaticConnection(false, true);
+  });
+  el('tongjiProvider').addEventListener('change', () => {
+    if (el('tongjiProvider').checked) el('aiProvider').value = 'auto';
+    prepareAutomaticConnection(false, true);
+  });
+  el('aiBaseUrl').addEventListener('input', () => { el('tongjiProvider').checked = false; el('aiProvider').value = 'custom'; el('aiModelName').value = ''; saveRememberedConnection(); updateConnectionStatus(); });
   el('aiBaseUrl').addEventListener('change', updateConnectionStatus);
   el('rememberApiKey').addEventListener('change', () => { handleRememberKeyChange(); emitMonitorUpdate(); });
   el('aiModelChoices').addEventListener('change', event => {
@@ -1412,6 +1467,7 @@
   renderFramework();
   loadBundledAgentFramework();
   loadRememberedKey();
+  prepareAutomaticConnection();
   updateActionFields();
   updateAgentInteractionControls();
   keepIslandObserverReadOnly();
