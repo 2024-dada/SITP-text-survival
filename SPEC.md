@@ -103,3 +103,5 @@ GitHub Pages 从仓库 `main` 根目录发布，地址固定为 `https://2024-da
 2026-11-26 更新：工具循环和每轮总请求次数不设固定上限；模型返回最终文本后结束，API 错误仍整轮不提交。模型设置按 Key 格式识别预设服务商，地址输入框已移除；通用 `sk-` Key 需选一次服务商。余额查询仅支持 DeepSeek 官方 API。底部监控台按 Agent 分组展示中文释义、代码参数名、当前值和运行状态；另展示推理运行时与模型连接信息。真实 API 回合及身体组联调仍待验收。
 
 2026-11-26 v4.4 更新：增加任意非空 Key、手动 Base URL 与模型名、OpenAI 兼容路径规范化和错误分类；尚未完成真实服务商 API 验收。
+
+服务商预设（本地完成、未发布）：自动模式仅对 mgk_、sk-or-v1-、gsk_ 分别配置 ModelGo、OpenRouter、Groq 单一官方地址；普通 sk- 不猜服务商。显式选择 OpenAI/DeepSeek/其他预设即填入对应地址并防抖获取模型；自定义地址可手改。所有输入变更清除旧模型并使在途查询失效。预设选择随记住 Key 选项保存。官方地址依据：https://console.groq.com/docs/openai 、https://openrouter.ai/docs/quickstart 、https://developers.openai.com/api/reference/overview 、https://api-docs.deepseek.com/ 。同济预设不硬编码未经核实的 API 路径；用户从 https://agi.tongji.edu.cn/docs/overview 确认地址后按兼容接口调用，尚未验证校园网络、CORS、模型协议或真实 Key。

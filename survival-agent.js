@@ -50,6 +50,7 @@
   const apiKeyStorageName = 'olorua.sitp.model-api-key';
   const apiBaseUrlStorageName = 'olorua.sitp.model-api-base-url';
   const apiModelStorageName = 'olorua.sitp.model-api-model';
+  const apiProviderStorageName = 'olorua.sitp.model-api-preset';
 
   const survivorAgentRule = '你是本次实验中的求生者 agent。只依据已经提供的文字、事件和自身状态交流，不补造岛屿参数、生理数值或事实。你只能修改当前 system 自己的 parameters、statement、events 和 time_clock；每项状态修改都必须说明 reason。time_clock 只是你自己的标注，不会推进岛屿模拟时钟。可用 send_message 定向给一个或多个 agent，收件人表示希望谁回应；所有 agent 下一轮都会看到上一轮完整发言。每轮所有 agent 并行处理同一份开始状态，不能看到同轮其他 agent 的结果。';
 
@@ -104,6 +105,7 @@
     try {
       const baseUrl = el('aiBaseUrl').value.trim();
       const model = el('aiModelName').value.trim();
+      localStorage.setItem(apiProviderStorageName, el('aiProvider').value);
       if (baseUrl) localStorage.setItem(apiBaseUrlStorageName, baseUrl);
       else localStorage.removeItem(apiBaseUrlStorageName);
       if (model) localStorage.setItem(apiModelStorageName, model);
@@ -119,6 +121,7 @@
       localStorage.removeItem(apiKeyStorageName);
       localStorage.removeItem(apiBaseUrlStorageName);
       localStorage.removeItem(apiModelStorageName);
+      localStorage.removeItem(apiProviderStorageName);
     }
     catch { status('无法删除浏览器中已保存的Key；请在浏览器站点设置中清除此网页数据。', 'error'); }
   }
@@ -130,6 +133,8 @@
         el('aiApiKey').value = key;
         el('aiBaseUrl').value = localStorage.getItem(apiBaseUrlStorageName) || '';
         el('aiModelName').value = localStorage.getItem(apiModelStorageName) || '';
+        const preset = localStorage.getItem(apiProviderStorageName);
+        if ([...el('aiProvider').options].some(option => option.value === preset)) el('aiProvider').value = preset;
         el('rememberApiKey').checked = true;
       }
       localStorage.removeItem('olorua.sitp.model-api-provider');
@@ -308,20 +313,34 @@
     return url.href;
   }
 
-  const modelGoBaseUrl = 'https://api.modelgo.ai/v1';
+  const providerPresets = {
+    modelgo: { name: 'ModelGo', url: 'https://api.modelgo.ai/v1', pattern: /^mgk_\S+$/ },
+    openrouter: { name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', pattern: /^sk-or-v1-\S+$/ },
+    groq: { name: 'Groq', url: 'https://api.groq.com/openai/v1', pattern: /^gsk_\S+$/ },
+    openai: { name: 'OpenAI', url: 'https://api.openai.com/v1' },
+    deepseek: { name: 'DeepSeek', url: 'https://api.deepseek.com' }
+  };
   let modelDiscoveryTimer;
-  function isModelGoKey(key) { return /^mgk_\S+$/.test(key); }
+  function detectedProvider(key) { return Object.values(providerPresets).find(provider => provider.pattern && provider.pattern.test(key)); }
+  function chosenProvider(key) {
+    const choice = el('aiProvider').value;
+    return choice === 'auto' ? detectedProvider(key) : providerPresets[choice];
+  }
 
-  function prepareAutomaticConnection(keyChanged = false) {
+  function prepareAutomaticConnection(keyChanged = false, providerChanged = false) {
     clearTimeout(modelDiscoveryTimer);
     const key = el('aiApiKey').value.trim();
-    if (isModelGoKey(key) && (keyChanged || !el('aiBaseUrl').value.trim())) {
-      el('aiBaseUrl').value = modelGoBaseUrl;
-      if (keyChanged) el('aiModelName').value = '';
-      saveRememberedConnection();
+    const provider = chosenProvider(key);
+    if (keyChanged || providerChanged) {
+      el('aiModelName').value = '';
+      if (provider) el('aiBaseUrl').value = provider.url;
+      else if (el('aiProvider').value === 'auto' || providerChanged) el('aiBaseUrl').value = '';
+    } else if (provider && !el('aiBaseUrl').value.trim()) {
+      el('aiBaseUrl').value = provider.url;
     }
+    saveRememberedConnection();
     updateConnectionStatus();
-    if (isModelGoKey(key) && el('aiBaseUrl').value.trim() === modelGoBaseUrl) {
+    if (key && provider && el('aiBaseUrl').value.trim() === provider.url) {
       modelDiscoveryTimer = setTimeout(discoverModels, 900);
     }
   }
@@ -335,14 +354,17 @@
       return null;
     }
     if (!baseUrl) {
-      el('providerStatus').textContent = '未识别为 ModelGo Key；请在高级连接设置填写服务商官方 Base URL。';
+      el('providerStatus').textContent = el('aiProvider').value === 'tongji'
+        ? '同济平台：请从官方使用文档确认并填写 Base URL；公开资料尚不足以核实接口路径。'
+        : 'Key 前缀无法唯一识别服务商；请选择服务商，或填写官方 Base URL。';
       emitMonitorUpdate();
       return null;
     }
     try {
       const endpoint = chatCompletionsEndpoint(baseUrl);
       const host = new URL(endpoint).host;
-      const provider = isModelGoKey(key) && baseUrl === modelGoBaseUrl ? 'ModelGo' : host;
+      const preset = chosenProvider(key);
+      const provider = preset && baseUrl === preset.url ? preset.name : host;
       el('providerStatus').textContent = provider + ' · ' + host + ' · Key 仅发送到此主机。';
       emitMonitorUpdate();
       return { provider, endpoint };
@@ -1402,7 +1424,8 @@
   el('exportReplaySnapshot').addEventListener('click', exportReplaySnapshot);
   el('aiApiKey').addEventListener('input', () => { saveRememberedKey(); prepareAutomaticConnection(true); });
   el('aiApiKey').addEventListener('change', saveRememberedKey);
-  el('aiBaseUrl').addEventListener('input', () => { saveRememberedConnection(); updateConnectionStatus(); });
+  el('aiProvider').addEventListener('change', () => { prepareAutomaticConnection(false, true); });
+  el('aiBaseUrl').addEventListener('input', () => { el('aiProvider').value = 'custom'; el('aiModelName').value = ''; saveRememberedConnection(); updateConnectionStatus(); });
   el('aiBaseUrl').addEventListener('change', updateConnectionStatus);
   el('rememberApiKey').addEventListener('change', () => { handleRememberKeyChange(); emitMonitorUpdate(); });
   el('aiModelChoices').addEventListener('change', event => {
