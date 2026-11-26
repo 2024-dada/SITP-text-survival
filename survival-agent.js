@@ -1263,42 +1263,13 @@
         waitingForStart: !interactionSession
       });
     }
-    const key = el('aiApiKey').value.trim();
-    const baseUrl = el('aiBaseUrl').value.trim();
-    let endpointHost = '未配置';
-    if (baseUrl) {
-      try { endpointHost = new URL(chatCompletionsEndpoint(baseUrl)).host; }
-      catch { endpointHost = 'Base URL 无效'; }
-    }
-    const modelSelect = el('aiModelChoices');
-    const modelCount = [...modelSelect.options].filter(option => option.value).length;
-    const modelName = el('aiModelName').value.trim();
     return {
-      source: interactionSession ? '本次 Agent 会话' : session ? '本次单人生存实验' : selectedFrameworkFile,
       systems,
-      lastResults: lastAgentRoundResults,
+      lastResults: lastAgentRoundResults.map(result => ({ systemId: result.systemId })),
       run: {
-        state: lastAgentRoundState,
-        error: lastAgentRoundError,
-        round: interactionSession ? interactionSession.round : session ? session.round : lastAgentRoundNumber,
         running: busy && roundActive,
         pendingRetry: Boolean(interactionSession && interactionSession.retryPrompt !== null),
-        modelCalls,
-        roundCalls,
-        commandCount: commandLog.length,
-        maxToolRounds: R.MAX_TOOL_ROUNDS === Infinity ? '无固定上限' : R.MAX_TOOL_ROUNDS,
-        maxSystems: R.MAX_SYSTEMS,
-        timeDelta: frame ? frame.framework_param.time_delta : '未载入',
-        realTimeDelta: frame ? frame.framework_param.real_time_delta : '未载入'
-      },
-      model: {
-        provider: endpointHost,
-        apiKeyConfigured: Boolean(key),
-        rememberKey: el('rememberApiKey').checked,
-        modelName: (key ? modelName.split(key).join('[已隐藏密钥]') : modelName) || '未选择',
-        modelCount,
-        providerStatus: el('providerStatus').textContent,
-        balance: el('apiBalance').textContent
+        timeDelta: frame ? frame.framework_param.time_delta : '未载入'
       }
     };
   }

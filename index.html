@@ -1,4 +1,4 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SITP · Agent 交互实验</title><link rel="stylesheet" href="style.css?v=4.6.0"><link rel="stylesheet" href="appearance.css?v=4.5.0"><script src="appearance.js?v=4.5.0"></script><script defer src="data.js?v=3.3.2"></script><script defer src="model.js?v=4.0.0"></script><script defer src="observation.js?v=3.3.2"></script><script defer src="app.js?v=4.0.0"></script><script defer src="body-framework.js?v=4.0.0"></script><script defer src="framework-runtime.js?v=4.3.0"></script><script defer src="survival-agent.js?v=4.6.0"></script><script defer src="monitor.js?v=4.4.0"></script></head><body>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SITP · Agent 交互实验</title><link rel="stylesheet" href="style.css?v=4.6.0"><link rel="stylesheet" href="appearance.css?v=4.5.0"><script src="appearance.js?v=4.5.0"></script><script defer src="data.js?v=3.3.2"></script><script defer src="model.js?v=4.0.0"></script><script defer src="observation.js?v=3.3.2"></script><script defer src="app.js?v=4.0.0"></script><script defer src="body-framework.js?v=4.0.0"></script><script defer src="framework-runtime.js?v=4.3.0"></script><script defer src="survival-agent.js?v=4.7.0"></script><script defer src="monitor.js?v=4.7.0"></script></head><body>
 <header><a class="brand" href="./"><span>◈</span><div>OLORUA<small>SITP · 文本生存 / 岛屿建模</small></div></a><div class="headRight"><span class="badge">Agent 逐轮交互</span><button id="help">使用说明</button><a href="https://github.com/2024-dada/SITP-text-survival" target="_blank" rel="noopener">GitHub ↗</a></div></header>
 <main><section class="intro"><div><div class="eyebrow">OLORUA AGENT WORKBENCH / 对话实验</div><h1>让求生者与岛屿 agent 对话。</h1><p>手动逐轮运行 · 同轮并行 · 状态变更附理由 · A/B/C 参数参考 Agent</p></div><div class="introNote">网站已附带本次提供的 A/B/C 参数参考框架并自动载入。模拟设定、缺失项和待组长确认状态照原样保留，不代表本岛实测；可在侧栏换载其他 Olorua JSON。</div></section>
 <div class="agentWorkbench">
@@ -95,7 +95,7 @@
 </details>
 </div>
 <section class="parameterMonitor" aria-labelledby="parameterMonitorHeading">
-  <div class="panelHead"><div><h2 id="parameterMonitorHeading">参数显示监控平台</h2><small>按当前真实 Agent 分组；中文释义、代码参数名和实时状态同时显示。</small></div><span id="monitorUpdated" aria-live="polite">等待载入 Agent</span></div>
+  <div class="panelHead"><div><h2 id="parameterMonitorHeading">实验模拟参数</h2><small>按已载入系统显示参数值、时间标注和状态；只展示实验与仿真数据。</small></div><span id="monitorUpdated" aria-live="polite">等待载入 Agent</span></div>
   <div id="parameterMonitorCards" class="monitorGrid"></div>
 </section>
 <footer><span>数据参考：OSM岸线 · FMS Lakeba温雨 · GLO90高程采样</span><span>静态页面 · 生存实验通过浏览器直连模型API · 身体示例不代表临床数据 / 观测算法 obs-dir-v4</span></footer></main>
