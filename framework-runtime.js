@@ -1,7 +1,7 @@
 (function (G) {
   'use strict';
 
-  const MAX_TOOL_ROUNDS = 6;
+  const MAX_TOOL_ROUNDS = Infinity;
   const MAX_SYSTEMS = 32;
 
   function makeTool(name, description, properties, required) {
@@ -368,7 +368,7 @@
     const operations = [];
     const toolsUsed = [];
     const toolTrace = [];
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    while (true) {
       const message = await requestCompletion(messages, availableTools, 'auto');
       const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
       if (!calls.length) {
@@ -403,7 +403,6 @@
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
       }
     }
-    throw new Error(system.system_id + ' 连续调用达到6次 API 往返上限，未完成本轮。');
   }
 
   function findSystem(frame, id) {

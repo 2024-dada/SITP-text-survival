@@ -239,7 +239,6 @@
   }
 
   async function requestCompletion(settings, messages, tools, choice) {
-    if (roundActive && roundCalls >= roundCallsLimit) throw new Error('本轮模型请求达到框架系统数对应的上限；岛屿和身体状态均未提交。');
     if (roundActive) roundCalls += 1;
     modelCalls += 1;
     el('modelCallCount').textContent = String(modelCalls);
@@ -258,6 +257,31 @@
     if (!message || typeof message !== 'object') throw new Error('模型响应中没有 choices[0].message，无法完成本轮。');
     if (data.choices[0].finish_reason === 'length') throw new Error('模型输出达到长度上限，未完成本轮；请稍后重试。');
     return message;
+  }
+
+  let balanceQuery = 0;
+  async function refreshBalance() {
+    const query = ++balanceQuery;
+    const output = el('apiBalance');
+    const button = el('refreshBalance');
+    output.textContent = '正在查询余额…';
+    button.disabled = true;
+    try {
+      const settings = getConnection();
+      const endpoint = new URL(settings.endpoint);
+      if (endpoint.hostname !== 'api.deepseek.com') throw new Error('当前服务暂不支持余额查询；目前支持 DeepSeek 官方 API。');
+      const response = await fetchWithTimeout(new URL('/user/balance', endpoint).href, {
+        method: 'GET', headers: { Authorization: 'Bearer ' + settings.apiKey }
+      }, '余额查询');
+      const data = await responseJson(response, settings.apiKey, '余额查询');
+      if (!Array.isArray(data.balance_infos) || !data.balance_infos.length) throw new Error('服务未返回余额信息。');
+      if (query !== balanceQuery) return;
+      output.textContent = data.balance_infos.map(item => item.currency + ' ' + item.total_balance + '（赠送 ' + item.granted_balance + '，充值 ' + item.topped_up_balance + '）').join('；') + (data.is_available ? ' · 可用' : ' · 余额不足') + ' · ' + new Date().toLocaleTimeString();
+    } catch (error) {
+      if (query === balanceQuery) output.textContent = error.message;
+    } finally {
+      if (query === balanceQuery) button.disabled = false;
+    }
   }
 
   async function discoverModels() {
@@ -821,6 +845,7 @@
       active.retryRecipients = [];
       appendAgentRound(roundNumber, researcherPrompt, inference);
       el('agentRoundCount').textContent = String(active.round);
+      refreshBalance();
       renderFramework();
       setAgentStatus('第 ' + roundNumber + ' 轮已提交 · 岛屿时钟未推进', 'ok');
       status('Agent 第 ' + roundNumber + ' 轮已完成。所有状态变化均限于所属 system，并记录了理由。', 'ok');
@@ -1120,6 +1145,7 @@
     if (session) refreshOptions();
   }
 
+  el('refreshBalance').addEventListener('click', refreshBalance);
   el('discoverModels').addEventListener('click', discoverModels);
   el('frameworkFile').addEventListener('change', loadFrameworkFile);
   el('applyFrameworkEditor').addEventListener('click', applyFrameworkEditor);
@@ -1153,7 +1179,7 @@
   renderFramework();
   loadBundledAgentFramework();
   loadRememberedKey();
-  if (el('aiApiKey').value.trim()) discoverModels();
+  if (el('aiApiKey').value.trim()) { discoverModels(); refreshBalance(); }
   updateActionFields();
   updateAgentInteractionControls();
   keepIslandObserverReadOnly();
