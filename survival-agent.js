@@ -35,15 +35,19 @@
   };
 
   let session = null;
+  let interactionSession = null;
   let selectedFramework = null;
-  let selectedFrameworkFile = '内置框架';
+  let selectedFrameworkFile = '未载入岛屿 JSON';
   let busy = false;
   let modelCalls = 0;
   let visibleLines = 0;
   let roundActive = false;
   let roundCalls = 0;
   let roundCallsLimit = 0;
+  let recipientOptionIds = [];
   const apiKeyStorageName = 'olorua.sitp.model-api-key';
+
+  const survivorAgentRule = '你是本次实验中的求生者 agent。只依据已经提供的文字、事件和自身状态交流，不补造岛屿参数、生理数值或事实。你只能修改当前 system 自己的 parameters、statement、events 和 time_clock；每项状态修改都必须说明 reason。time_clock 只是你自己的标注，不会推进岛屿模拟时钟。可用 send_message 定向给一个或多个 agent，收件人表示希望谁回应；所有 agent 下一轮都会看到上一轮完整发言。每轮所有 agent 并行处理同一份开始状态，不能看到同轮其他 agent 的结果。';
 
   function say(role, text) {
     const box = el('simLog');
@@ -110,13 +114,63 @@
 
   function setBusy(value) {
     busy = value;
-    el('runAction').disabled = value || !session || Boolean(session && session.pendingAction);
-    el('retryAction').disabled = value;
-    el('retryAction').hidden = value || !session || !session.pendingAction;
-    document.querySelectorAll('.actionComposer select, #startExperiment, #randomSeed').forEach(input => { input.disabled = value || Boolean(session && session.pendingAction); });
+    el('runAction').disabled = true;
+    el('retryAction').disabled = true;
+    el('retryAction').hidden = true;
+    document.querySelectorAll('.actionComposer select, #startExperiment, #randomSeed').forEach(input => { input.disabled = true; });
     document.querySelectorAll('.aiSettingsGrid input, .aiSettingsGrid select, #discoverModels').forEach(input => { input.disabled = value; });
-    el('endExperiment').disabled = value;
+    el('endExperiment').disabled = true;
     updateFrameworkControls();
+    updateAgentInteractionControls();
+  }
+
+  function updateAgentInteractionControls() {
+    const active = Boolean(interactionSession);
+    const pending = active && interactionSession.retryPrompt !== null;
+    const showRetry = pending && !busy;
+    const loaded = Boolean(selectedFramework && selectedFrameworkFile !== '未载入岛屿 JSON' && selectedFrameworkFile !== '内置框架');
+    el('runAgentRound').disabled = busy || Boolean(session) || (!active && !loaded) || pending;
+    el('runAgentRound').textContent = active ? '运行第 ' + (interactionSession.round + 1) + ' 轮' : '运行第一轮';
+    el('retryAgentRound').hidden = !showRetry;
+    el('retryAgentRound').disabled = busy;
+    el('endAgentInteraction').disabled = busy || !active;
+    el('agentRoundPrompt').disabled = busy || pending || Boolean(session);
+    el('agentRecipients').disabled = busy || pending || Boolean(session) || (!active && !loaded);
+  }
+
+  function setAgentStatus(text, kind) {
+    const node = el('agentInteractionStatus');
+    node.textContent = text;
+    node.dataset.kind = kind || '';
+  }
+
+  function renderAgentRecipients(frame) {
+    const select = el('agentRecipients');
+    const previous = new Set([...select.options].filter(option => option.selected).map(option => option.value));
+    const ids = frame ? frame.systems.map(system => system.system_id) : [];
+    if (frame && !ids.includes('survivor_agent')) ids.unshift('survivor_agent');
+    select.replaceChildren();
+    if (!frame) {
+      select.append(new Option('载入 JSON 后选择回应对象', '', true, true));
+      select.options[0].disabled = true;
+      recipientOptionIds = [];
+      return;
+    }
+    const sameAgents = ids.length === recipientOptionIds.length && ids.every((id, index) => id === recipientOptionIds[index]);
+    for (const id of ids) {
+      const option = new Option(displayAgentName(id), id);
+      option.selected = sameAgents ? previous.has(id) : true;
+      select.append(option);
+    }
+    recipientOptionIds = ids;
+  }
+
+  function selectedAgentRecipientIds() {
+    return [...el('agentRecipients').options].filter(option => option.selected && !option.disabled).map(option => option.value);
+  }
+
+  function keepIslandObserverReadOnly() {
+    document.querySelectorAll('#startExperiment, #endExperiment, #randomSeed, #runAction, #retryAction, #play, [data-step], #nextRain, #collector, #save, #load, #reset, #nearby button').forEach(control => { control.disabled = true; });
   }
 
   function lockResearchControls(locked) {
@@ -163,7 +217,7 @@
     try {
       return await fetch(url, { ...options, signal: controller.signal, mode: 'cors', credentials: 'omit', cache: 'no-store' });
     } catch (error) {
-      const roundNote = label === '模型调用' ? '此轮状态没有提交；可以重试同一动作。' : '可以稍后重试。';
+      const roundNote = label === '模型调用' ? '此轮状态没有提交；可以重试同一轮。' : '可以稍后重试。';
       if (error.name === 'AbortError') throw new Error(label + '等待超过90秒，' + roundNote);
       throw new Error(label + '网络连接失败。请检查网络、API 地址和服务商跨域设置；' + roundNote + '浏览器提示：' + error.message);
     } finally {
@@ -188,6 +242,7 @@
     if (roundActive) roundCalls += 1;
     modelCalls += 1;
     el('modelCallCount').textContent = String(modelCalls);
+    el('agentModelCallCount').textContent = '模型请求 ' + modelCalls;
     const payload = {
       model: settings.model, messages, tools, tool_choice: choice, max_tokens: 1800, stream: false
     };
@@ -602,8 +657,214 @@
     }
   }
 
+  function interactionFrame() {
+    if (!selectedFramework || selectedFrameworkFile === '未载入岛屿 JSON' || selectedFrameworkFile === '内置框架') {
+      throw new Error('默认参考框架未能载入；请检查网站附带 JSON，或在右侧观测栏手动载入 Olorua systems。');
+    }
+    if (session) throw new Error('旧版单人实验仍在运行；请先结束它再开始 Agent 交互。');
+    const frame = R.normalize(selectedFramework);
+    if (frame.systems.some(system => system.system_id === 'survivor_agent')) {
+      throw new Error('岛屿 JSON 已使用保留的 system_id “survivor_agent”；请调整该 ID 后再载入。');
+    }
+    if (frame.systems.length + 1 > R.MAX_SYSTEMS) {
+      throw new Error('岛屿 JSON 有 ' + frame.systems.length + ' 个系统；接入求生者 agent 后最多支持 ' + (R.MAX_SYSTEMS - 1) + ' 个岛屿系统。');
+    }
+    frame.name += ' · Agent 交互';
+    frame.systems.unshift({
+      // The schema requires a number; this local annotation is not island time or a body parameter.
+      system_id: 'survivor_agent', rule: survivorAgentRule, time_clock: 0,
+      parameters: [],
+      statement: '尚无身体组状态配置；依据当前可见文本参与对话，不补造生理参数。',
+      events: []
+    });
+    R.validate(frame);
+    return frame;
+  }
+
+  function displayAgentName(systemId) {
+    return systemId === 'survivor_agent' ? '求生者 Agent' : String(systemId);
+  }
+
+  function auditValue(value) {
+    if (value === null || value === undefined) return '（无）';
+    return typeof value === 'string' ? value : JSON.stringify(value);
+  }
+
+  function changeText(command) {
+    const change = command.change;
+    return change.field + '：' + auditValue(change.before) + ' → ' + auditValue(change.after) + '；原因：' + change.reason;
+  }
+
+  function appendAgentMessage(container, sender, text, label, kind) {
+    const article = document.createElement('article');
+    const head = document.createElement('div');
+    const name = document.createElement('strong');
+    const tag = document.createElement('span');
+    const body = document.createElement('p');
+    article.className = 'agentMessage' + (kind ? ' agentMessage-' + kind : '');
+    head.className = 'agentMessageHead';
+    name.textContent = sender;
+    tag.textContent = label || '';
+    body.textContent = text;
+    head.append(name, tag);
+    article.append(head, body);
+    container.append(article);
+  }
+
+  function appendAgentRound(roundNumber, researcherPrompt, researcherRecipients, inference) {
+    const block = document.createElement('section');
+    const heading = document.createElement('h3');
+    const transcript = document.createElement('div');
+    block.className = 'agentRoundBlock';
+    heading.className = 'agentRoundHeading';
+    heading.textContent = '第 ' + roundNumber + ' 轮 · ' + inference.results.length + ' 个 agent 并行';
+    transcript.className = 'agentRoundMessages';
+    block.append(heading, transcript);
+    if (researcherPrompt) appendAgentMessage(transcript, '研究者', researcherPrompt, '希望 ' + researcherRecipients.map(displayAgentName).join('、') + ' 回应 · 全体可见', 'researcher');
+    for (const result of inference.results) {
+      const speaker = displayAgentName(result.systemId);
+      appendAgentMessage(transcript, speaker, result.finalText || '（本轮没有补充文本发言）', '公开发言', 'agent');
+      for (const message of inference.messages.filter(item => item.sender === result.systemId)) {
+        if (message.kind !== 'directed') continue;
+        const recipients = message.recipients.map(displayAgentName).join('、');
+        appendAgentMessage(transcript, speaker, message.text, '希望 ' + recipients + ' 回应 · 全体可见', 'directed');
+      }
+      const changes = inference.commandLog.filter(command => command.system_id === result.systemId && command.change);
+      for (const command of changes) appendAgentMessage(transcript, speaker, changeText(command), '自身状态变化', 'change');
+      if (result.toolTrace.length) {
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        const pre = document.createElement('pre');
+        details.className = 'agentToolDetails';
+        summary.textContent = '查看工具调用与结果（' + result.toolTrace.length + '）';
+        pre.textContent = JSON.stringify(result.toolTrace, null, 2);
+        details.append(summary, pre);
+        transcript.append(details);
+      }
+    }
+    el('agentTranscript').querySelector('.emptyLog')?.remove();
+    el('agentTranscript').append(block);
+    el('agentTranscript').scrollTop = el('agentTranscript').scrollHeight;
+  }
+
+  function messagesForNextRound(researcherPrompt, researcherRecipients, inference) {
+    const messages = [];
+    if (researcherPrompt) messages.push({ kind: 'researcher', sender: '研究者', recipients: researcherRecipients, text: researcherPrompt });
+    for (const result of inference.results) {
+      if (result.finalText) messages.push({ kind: 'speech', sender: result.systemId, text: result.finalText });
+      for (const message of inference.messages.filter(item => item.sender === result.systemId && item.kind === 'directed')) {
+        messages.push({ kind: 'directed', sender: message.sender, recipients: message.recipients, text: message.text });
+      }
+      for (const command of inference.commandLog.filter(item => item.system_id === result.systemId && item.change)) {
+        messages.push({ kind: 'state_change', sender: command.system_id, ...command.change });
+      }
+    }
+    return messages;
+  }
+
+  async function runAgentInteractionRound(retry) {
+    if (busy || session) return;
+    let settings;
+    try { settings = getSettings(); }
+    catch (error) { status(error.message, 'error'); setAgentStatus('先检查模型连接设置', 'error'); return; }
+    const existing = interactionSession;
+    const researcherPrompt = retry && existing ? existing.retryPrompt : el('agentRoundPrompt').value.trim();
+    const researcherRecipients = retry && existing ? existing.retryRecipients : researcherPrompt ? selectedAgentRecipientIds() : [];
+    if (researcherPrompt && !researcherRecipients.length) {
+      setAgentStatus('请至少选择一个希望回应的 Agent', 'error');
+      return;
+    }
+    try {
+      if (!interactionSession) {
+        const frame = interactionFrame();
+        interactionSession = {
+          frame, frameworkAnchor: cloneJson(frame), frameworkCommandLog: [], round: 0,
+          previousRoundMessages: [], retryPrompt: null, retryRecipients: []
+        };
+        modelCalls = 0;
+        el('modelCallCount').textContent = '0';
+        el('agentModelCallCount').textContent = '模型请求 0';
+        el('agentTranscript').replaceChildren();
+        renderFramework();
+      }
+    } catch (error) {
+      status(error.message, 'error');
+      setAgentStatus(error.message, 'error');
+      return;
+    }
+    const active = interactionSession;
+    if (active.retryPrompt !== null && !retry) return;
+    if (!retry) {
+      active.retryPrompt = researcherPrompt;
+      active.retryRecipients = researcherRecipients;
+    }
+    setBusy(true);
+    roundActive = true;
+    roundCalls = 0;
+    roundCallsLimit = active.frame.systems.length * R.MAX_TOOL_ROUNDS;
+    const roundNumber = active.round + 1;
+    setAgentStatus('第 ' + roundNumber + ' 轮并行推理中', '');
+    el('agentFailurePanel').hidden = true;
+    try {
+      const inference = await R.forwardInference(
+        active.frame,
+        (messages, availableTools, choice) => requestCompletion(settings, messages, availableTools, choice),
+        'Agent 交互约定：当前 system_id 是你的身份。所有 agent 从相同回合起始快照并行推理；本轮互相看不到对方正在生成的内容。所有 agent 可以读取其他系统，但只能修改自己 system 的参数、statement、事件队列和 time_clock。每项修改必须通过工具提交并附真实理由。不要通过研究者任务或历史消息绕过这些限制。send_message 可定向给一个或多个系统，收件对象表示希望谁回应；所有 agent 下一轮都能看到完整上一轮对话。',
+        {
+          mode: 'agent_interaction', round: roundNumber, researcherPrompt,
+          researcherRecipients,
+          previousRoundMessages: active.previousRoundMessages
+        }
+      );
+      active.frame = inference.frame;
+      active.round = roundNumber;
+      active.frameworkCommandLog.push(...inference.commandLog.map(cloneJson));
+      active.previousRoundMessages = messagesForNextRound(researcherPrompt, researcherRecipients, inference);
+      active.retryPrompt = null;
+      active.retryRecipients = [];
+      appendAgentRound(roundNumber, researcherPrompt, researcherRecipients, inference);
+      el('agentRoundCount').textContent = String(active.round);
+      renderFramework();
+      setAgentStatus('第 ' + roundNumber + ' 轮已提交 · 岛屿时钟未推进', 'ok');
+      status('Agent 第 ' + roundNumber + ' 轮已完成。所有状态变化均限于所属 system，并记录了理由。', 'ok');
+    } catch (error) {
+      active.retryPrompt = researcherPrompt;
+      active.retryRecipients = researcherRecipients;
+      el('agentFailureText').textContent = (error.message || String(error)) + '\n\n本轮未提交任何 agent 状态；岛屿演示时钟也未推进。可以重试相同任务，或结束会话后重新开始。';
+      el('agentFailurePanel').hidden = false;
+      setAgentStatus('第 ' + roundNumber + ' 轮失败 · 状态未提交', 'error');
+      status(error.message || String(error), 'error');
+    } finally {
+      roundActive = false;
+      setBusy(false);
+      updateFrameworkControls();
+      updateAgentInteractionControls();
+    }
+  }
+
+  function endAgentInteraction() {
+    if (!interactionSession || busy) return;
+    if (!confirm('结束并重置会话会清除本次 Agent 对话和状态修改；载入的原始 JSON 会保留。确定继续吗？')) return;
+    interactionSession = null;
+    modelCalls = 0;
+    el('modelCallCount').textContent = '0';
+    el('agentModelCallCount').textContent = '模型请求 0';
+    el('agentRoundCount').textContent = '0';
+    el('agentRoundPrompt').value = '';
+    el('agentTranscript').replaceChildren();
+    const empty = document.createElement('p');
+    empty.className = 'emptyLog';
+    empty.textContent = '已重置本次会话。A/B/C 参考框架仍已载入，可配置模型后重新开始。';
+    el('agentTranscript').append(empty);
+    el('agentFailurePanel').hidden = true;
+    el('agentFailureText').textContent = '';
+    setAgentStatus('会话已重置 · 原始 JSON 保留', '');
+    renderFramework();
+    updateAgentInteractionControls();
+  }
+
   function startExperiment() {
-    if (busy) return;
+    if (busy || interactionSession) return;
     try { getSettings(); }
     catch (error) { status(error.message, 'error'); return; }
     const seed = Number(el('simSeed').value);
@@ -668,15 +929,17 @@
   }
 
   function updateFrameworkControls() {
-    const hasFrame = Boolean(session ? session.body : selectedFramework);
-    const commandCount = session ? session.frameworkCommandLog.length : 0;
-    el('frameworkFile').disabled = busy || Boolean(session);
+    const activeSession = interactionSession || session;
+    const currentFrame = interactionSession ? interactionSession.frame : session ? session.body : selectedFramework;
+    const hasFrame = Boolean(currentFrame);
+    const commandCount = activeSession ? activeSession.frameworkCommandLog.length : 0;
+    el('frameworkFile').disabled = busy || Boolean(activeSession);
     el('exportFramework').disabled = !hasFrame || busy;
-    el('exportFrameworkLog').disabled = !session || busy;
-    el('frameworkReplayIndex').disabled = !session || busy || commandCount === 0;
-    el('exportReplaySnapshot').disabled = !session || busy;
-    el('frameworkEditor').disabled = busy || Boolean(session);
-    el('applyFrameworkEditor').disabled = busy || Boolean(session);
+    el('exportFrameworkLog').disabled = !activeSession || busy;
+    el('frameworkReplayIndex').disabled = !activeSession || busy || commandCount === 0;
+    el('exportReplaySnapshot').disabled = !activeSession || busy;
+    el('frameworkEditor').disabled = busy || Boolean(activeSession);
+    el('applyFrameworkEditor').disabled = busy || Boolean(activeSession);
     const locked = busy || Boolean(session && session.pendingAction);
     el('frameworkClockEditors').querySelectorAll('input, button').forEach(control => { control.disabled = locked; });
   }
@@ -687,50 +950,29 @@
     if (!frame) return;
     for (const system of frame.systems) {
       const row = document.createElement('div');
-      const label = document.createElement('label');
       const name = document.createElement('span');
-      const input = document.createElement('input');
-      const button = document.createElement('button');
+      const clock = document.createElement('span');
       row.className = 'frameworkClockRow';
       name.textContent = system.system_id;
-      input.type = 'number';
-      input.step = 'any';
-      input.value = String(system.time_clock);
-      input.setAttribute('aria-label', system.system_id + ' time_clock');
-      button.type = 'button';
-      button.textContent = '设定';
-      button.addEventListener('click', () => {
-        const value = input.valueAsNumber;
-        if (!Number.isFinite(value)) { setFrameworkStatus(system.system_id + ' 的 time_clock 必须是有限数值。', 'error'); return; }
-        const command = { type: 'set_time_clock', system_id: system.system_id, value };
-        const target = session ? session.body : selectedFramework;
-        try {
-          R.applyLoggedCommand(target, command);
-          if (session) session.frameworkCommandLog.push(cloneJson(command));
-          else selectedFramework = R.normalize(target);
-          renderFramework();
-          setFrameworkStatus(system.system_id + ' 的 time_clock 已设为 ' + value + '；该字段不会自动推进。', 'ok');
-        } catch (error) {
-          setFrameworkStatus('未能设定 time_clock：' + (error.message || String(error)), 'error');
-        }
-      });
-      label.append(name, input);
-      row.append(label, button);
+      clock.className = 'frameworkClockValue';
+      clock.textContent = 'time_clock · ' + system.time_clock + (system.system_id === 'survivor_agent' ? '（本地初始标注）' : '');
+      row.append(name, clock);
       box.append(row);
     }
   }
 
   function renderFrameworkReplay() {
-    if (!session) {
+    const activeSession = interactionSession || session;
+    if (!activeSession) {
       el('frameworkReplayCount').textContent = '0 / 0';
       el('frameworkReplay').textContent = '开始实验后可按命令序号回放。';
       updateFrameworkControls();
       return;
     }
-    const commands = session.frameworkCommandLog;
+    const commands = activeSession.frameworkCommandLog;
     const index = Math.max(0, Math.min(commands.length, Number(el('frameworkReplayIndex').value) || 0));
     try {
-      const frame = R.replay(session.frameworkAnchor, commands, index);
+      const frame = R.replay(activeSession.frameworkAnchor, commands, index);
       el('frameworkReplayCount').textContent = index + ' / ' + commands.length;
       el('frameworkReplay').textContent = JSON.stringify(frame, null, 2);
     } catch (error) {
@@ -741,24 +983,27 @@
   }
 
   function renderFramework() {
-    const frame = session ? session.body : selectedFramework;
-    const source = session ? '本次实验' : selectedFrameworkFile;
+    const activeSession = interactionSession || session;
+    const frame = interactionSession ? interactionSession.frame : session ? session.body : selectedFramework;
+    const source = interactionSession ? '本次 Agent 会话' : session ? '本次实验' : selectedFrameworkFile;
     if (!frame) {
       el('frameworkSummary').textContent = '未加载';
       el('frameworkState').textContent = '没有有效框架。';
+      renderAgentRecipients(null);
       renderFrameworkReplay();
       return;
     }
     el('frameworkSummary').textContent = frame.name + ' · ' + frame.systems.length + ' 个系统';
     el('frameworkState').textContent = JSON.stringify(frame, null, 2);
     el('frameworkEditor').value = JSON.stringify(frame, null, 2);
+    renderAgentRecipients(frame);
     renderFrameworkClockEditors(frame);
-    const commands = session ? session.frameworkCommandLog : [];
+    const commands = activeSession ? activeSession.frameworkCommandLog : [];
     el('frameworkReplayIndex').max = String(commands.length);
     el('frameworkReplayIndex').value = String(commands.length);
     setFrameworkStatus(
       source + '：' + frame.systems.length + ' 个系统；仿真步长 ' + frame.framework_param.time_delta + '，现实等待参数 ' + frame.framework_param.real_time_delta + '。' +
-      (session ? ' 已提交 ' + session.round + ' 个回合、记录 ' + commands.length + ' 条状态命令。' : ' 开始实验后每个系统将并行读取同一份回合起始状态。'),
+      (activeSession ? ' 已提交 ' + activeSession.round + ' 个回合、记录 ' + commands.length + ' 条状态命令。' : ' 开始后每个系统将并行读取同一份回合起始状态。'),
       'ok'
     );
     renderFrameworkReplay();
@@ -781,7 +1026,7 @@
     const file = event.target.files && event.target.files[0];
     event.target.value = '';
     if (!file) return;
-    if (session || busy) { setFrameworkStatus('请先结束当前实验，再更换推理框架。', 'error'); return; }
+    if (session || interactionSession || busy) { setFrameworkStatus('请先结束当前会话，再更换推理框架。', 'error'); return; }
     if (file.size > 2 * 1024 * 1024) { setFrameworkStatus('框架文件超过2MB，请检查文件。', 'error'); return; }
     try {
       const parsed = JSON.parse(await file.text());
@@ -790,46 +1035,71 @@
       selectedFrameworkFile = file.name;
       renderFramework();
       setFrameworkStatus('已载入 ' + file.name + '：' + frame.systems.length + ' 个系统。rule 将作为模型系统提示发送。', 'ok');
+      setAgentStatus('已载入 ' + frame.systems.length + ' 个岛屿 systems · 配置模型后可开始', 'ok');
+      updateAgentInteractionControls();
     } catch (error) {
       setFrameworkStatus('框架未载入：' + (error.message || String(error)), 'error');
     }
   }
 
+  async function loadBundledAgentFramework() {
+    try {
+      const response = await fetch('./olorua-agent-framework.json?v=4.2.2', { cache: 'no-store', credentials: 'omit' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const frame = R.normalize(await response.json());
+      selectedFramework = frame;
+      selectedFrameworkFile = '网站附带 A/B/C 参数参考 Agent';
+      renderFramework();
+      setFrameworkStatus('已自动载入 ' + frame.systems.length + ' 个 A/B/C 参数参考 Agent。数值和规则来自网站/参数快照，模拟设定与待确认项不代表本岛实测。', 'ok');
+      setAgentStatus('已载入 A/B/C 参考 Agent · 配置模型后可运行', 'ok');
+    } catch (error) {
+      setFrameworkStatus('无法自动载入网站附带的 A/B/C Agent 框架（' + (error.message || String(error)) + '）；仍可手动载入其他 Olorua systems JSON。', 'error');
+      setAgentStatus('未能自动载入 · 可在侧栏手动载入 JSON', '');
+    } finally {
+      updateAgentInteractionControls();
+    }
+  }
+
   function applyFrameworkEditor() {
-    if (session || busy) { setFrameworkStatus('请先结束当前实验，再编辑推理框架。', 'error'); return; }
+    if (session || interactionSession || busy) { setFrameworkStatus('请先结束当前会话，再编辑推理框架。', 'error'); return; }
     try {
       const frame = R.normalize(JSON.parse(el('frameworkEditor').value));
       selectedFramework = frame;
       selectedFrameworkFile = '网页 JSON 编辑器';
       renderFramework();
       setFrameworkStatus('网页编辑的框架已应用：' + frame.systems.length + ' 个系统。', 'ok');
+      setAgentStatus('JSON 已应用 · 配置模型后可开始', 'ok');
+      updateAgentInteractionControls();
     } catch (error) {
       setFrameworkStatus('框架未应用：' + (error.message || String(error)), 'error');
     }
   }
 
   function exportFrameworkSnapshot() {
-    const frame = session ? session.body : selectedFramework;
+    const frame = interactionSession ? interactionSession.frame : session ? session.body : selectedFramework;
     if (!frame) return;
     downloadJson(safeFilename(frame.name) + '-snapshot.json', R.normalize(frame));
   }
 
   function exportFrameworkLog() {
-    if (!session) return;
-    downloadJson(safeFilename(session.body.name) + '-commands.json', {
+    const activeSession = interactionSession || session;
+    const frame = interactionSession ? interactionSession.frame : session && session.body;
+    if (!activeSession || !frame) return;
+    downloadJson(safeFilename(frame.name) + '-commands.json', {
       format: 'SITP-framework-command-log',
       version: 1,
-      completed_rounds: session.round,
-      initial_snapshot: session.frameworkAnchor,
-      commands: session.frameworkCommandLog,
-      current_snapshot: session.body
+      completed_rounds: activeSession.round,
+      initial_snapshot: activeSession.frameworkAnchor,
+      commands: activeSession.frameworkCommandLog,
+      current_snapshot: frame
     });
   }
 
   function exportReplaySnapshot() {
-    if (!session) return;
+    const activeSession = interactionSession || session;
+    if (!activeSession) return;
     const index = Number(el('frameworkReplayIndex').value) || 0;
-    const frame = R.replay(session.frameworkAnchor, session.frameworkCommandLog, index);
+    const frame = R.replay(activeSession.frameworkAnchor, activeSession.frameworkCommandLog, index);
     downloadJson(safeFilename(frame.name) + '-replay-' + index + '.json', frame);
   }
 
@@ -849,6 +1119,7 @@
 
   function refreshAfterIslandRender() {
     lockResearchControls(Boolean(session));
+    keepIslandObserverReadOnly();
     if (session) refreshOptions();
   }
 
@@ -867,6 +1138,9 @@
   el('randomSeed').addEventListener('click', randomSeed);
   el('startExperiment').addEventListener('click', startExperiment);
   el('endExperiment').addEventListener('click', endExperiment);
+  el('runAgentRound').addEventListener('click', () => runAgentInteractionRound(false));
+  el('retryAgentRound').addEventListener('click', () => runAgentInteractionRound(true));
+  el('endAgentInteraction').addEventListener('click', endAgentInteraction);
   el('actionKind').addEventListener('change', updateActionFields);
   el('collectSite').addEventListener('change', () => refreshResourceOptions());
   el('runAction').addEventListener('click', () => {
@@ -875,16 +1149,17 @@
     catch (error) { status(error.message, 'error'); say('输入错误', error.message); }
   });
   el('retryAction').addEventListener('click', () => { if (session && session.pendingAction && !busy) performRound(cloneJson(session.pendingAction)); });
-  try {
-    selectedFramework = R.normalize(G.SITPBodyFramework);
-  } catch (error) {
-    selectedFramework = null;
-    setFrameworkStatus('内置框架不可用：' + (error.message || String(error)), 'error');
-  }
+  selectedFramework = null;
+  selectedFrameworkFile = '未载入岛屿 JSON';
+  setFrameworkStatus('正在载入网站附带的 A/B/C 参数参考 Agent；若自动载入失败，可在此手动选择 JSON。');
+  setAgentStatus('正在载入 A/B/C 参考框架…', '');
   renderFramework();
+  loadBundledAgentFramework();
   loadRememberedKey();
   if (el('aiApiKey').value.trim()) discoverModels();
   updateActionFields();
+  updateAgentInteractionControls();
+  keepIslandObserverReadOnly();
   G.SurvivalAgent = Object.freeze({ refreshAfterIslandRender });
   new MutationObserver(refreshAfterIslandRender).observe(el('nearby'), { childList: true });
 })(globalThis);
