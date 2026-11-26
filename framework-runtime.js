@@ -48,6 +48,31 @@
     }, ['expression', 'variables'])
   ];
 
+  const interactionTools = [
+    ...tools.filter(tool => ['list_systems', 'read_system', 'math_eval'].includes(tool.function.name)),
+    makeTool('edit_parameters', '只修改当前负责系统自己的数值参数；每项修改都必须说明理由。修改会在本轮全体系统成功后应用。', {
+      ops: { type: 'array', items: { type: 'object', properties: {
+        op: { type: 'string', enum: ['add', 'change', 'remove'] },
+        name: { type: 'string' },
+        value: { type: 'number' },
+        reason: { type: 'string' }
+      }, required: ['op', 'name', 'value', 'reason'], additionalProperties: false } }
+    }, ['ops']),
+    makeTool('set_statement', '更新当前负责系统自己的 statement；必须说明为什么这样更新。', {
+      statement: { type: 'string' }, reason: { type: 'string' }
+    }, ['statement', 'reason']),
+    makeTool('set_time_clock', '只更新当前负责系统自己的 time_clock 标注；不会推进岛屿时钟，必须说明为什么这样更新。', {
+      value: { type: 'number' }, reason: { type: 'string' }
+    }, ['value', 'reason']),
+    makeTool('consume_events', '清空当前系统已经处理的事件；必须说明清理原因。', {
+      reason: { type: 'string' }
+    }, ['reason']),
+    makeTool('send_message', '向一个或多个系统发送公开文本消息。所有系统下一轮都能看到完整对话；收件对象表示希望谁回应。此工具不会修改收件系统的参数。', {
+      target_system_ids: { type: 'array', items: { type: 'string' } },
+      message: { type: 'string' }
+    }, ['target_system_ids', 'message'])
+  ];
+
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
   }
@@ -243,7 +268,8 @@
     return names;
   }
 
-  function executeTool(snapshot, self, operations, name, args) {
+  function executeTool(snapshot, self, operations, name, args, availableTools, requireReasons) {
+    if (!availableTools.some(tool => tool.function.name === name)) throw new Error('当前模式不支持工具 ' + String(name) + '。');
     const systems = snapshot.systems;
     const findSystem = id => systems.find(system => system.system_id === id);
     if (name === 'list_systems') return { ok: true, systems: systems.map(system => ({
@@ -266,9 +292,10 @@
         if (!operation || !['add', 'change', 'remove'].includes(operation.op) || typeof operation.name !== 'string' || !operation.name.trim() || !Number.isFinite(operation.value)) {
           throw new Error('edit_parameters 中存在不合法操作、参数名或数值。');
         }
+        if (requireReasons && (typeof operation.reason !== 'string' || !operation.reason.trim())) throw new Error('每项 edit_parameters 修改都必须填写 reason。');
         if (operation.op === 'change' && !known.has(operation.name)) { ignored += 1; continue; }
         if (operation.op === 'remove' && !known.has(operation.name)) { ignored += 1; continue; }
-        queued.push({ type: 'edit_parameter', op: operation.op, name: operation.name, value: operation.value });
+        queued.push({ type: 'edit_parameter', op: operation.op, name: operation.name, value: operation.value, reason: requireReasons ? operation.reason.trim() : undefined });
         if (operation.op === 'add') known.add(operation.name);
         if (operation.op === 'remove') known.delete(operation.name);
       }
@@ -277,8 +304,15 @@
     }
     if (name === 'set_statement') {
       if (typeof args.statement !== 'string' || !args.statement.trim()) throw new Error('set_statement 需要非空的状态说明。');
-      operations.push({ type: 'set_statement', statement: args.statement.trim() });
+      if (requireReasons && (typeof args.reason !== 'string' || !args.reason.trim())) throw new Error('set_statement 必须填写 reason。');
+      operations.push({ type: 'set_statement', statement: args.statement.trim(), reason: requireReasons ? args.reason.trim() : undefined });
       return { ok: true, queued: true };
+    }
+    if (name === 'set_time_clock') {
+      if (!Number.isFinite(args.value)) throw new Error('set_time_clock.value 必须是有限数值。');
+      if (requireReasons && (typeof args.reason !== 'string' || !args.reason.trim())) throw new Error('set_time_clock 必须填写 reason。');
+      operations.push({ type: 'set_time_clock', value: args.value, reason: requireReasons ? args.reason.trim() : undefined });
+      return { ok: true, queued: true, island_clock_unchanged: true };
     }
     if (name === 'deliver_event') {
       if (typeof args.target_system_id !== 'string') throw new Error('deliver_event.target_system_id 必须是文本。');
@@ -299,8 +333,22 @@
       return { ok: true, queued: true, visible_next_round: true };
     }
     if (name === 'consume_events') {
-      operations.push({ type: 'consume_events' });
+      if (requireReasons && (typeof args.reason !== 'string' || !args.reason.trim())) throw new Error('consume_events 必须填写 reason。');
+      operations.push({ type: 'consume_events', reason: requireReasons ? args.reason.trim() : undefined });
       return { ok: true, queued: true };
+    }
+    if (name === 'send_message') {
+      if (!Array.isArray(args.target_system_ids) || !args.target_system_ids.length || typeof args.message !== 'string' || !args.message.trim()) {
+        throw new Error('send_message 需要一个或多个收件系统和非空消息。');
+      }
+      const targets = [...new Set(args.target_system_ids)];
+      if (targets.length !== args.target_system_ids.length) throw new Error('send_message 收件系统不能重复。');
+      for (const id of targets) {
+        if (typeof id !== 'string' || !findSystem(id)) throw new Error('send_message 目标系统不存在：' + String(id) + '。');
+        if (id === self.system_id) throw new Error('send_message 只能发给其他系统。');
+      }
+      operations.push({ type: 'send_message', target_system_ids: targets, message: args.message.trim() });
+      return { ok: true, queued: true, visible_next_round: true, visible_to_all_agents: true };
     }
     if (name === 'math_eval') return { ok: true, value: evaluateMath(args.expression, args.variables) };
     throw new Error('不支持的工具：' + String(name));
@@ -310,21 +358,25 @@
     return system.rule + (suffix ? '\n\n' + suffix : '');
   }
 
-  async function runSystem(snapshot, system, requestCompletion, suffix) {
+  async function runSystem(snapshot, system, requestCompletion, suffix, context, availableTools, requireReasons) {
+    const initialState = systemState(snapshot, system);
+    if (context) initialState.interaction_context = clone(context);
     const messages = [
       { role: 'system', content: systemPrompt(system, suffix) },
-      { role: 'user', content: JSON.stringify(systemState(snapshot, system)) }
+      { role: 'user', content: JSON.stringify(initialState) }
     ];
     const operations = [];
     const toolsUsed = [];
+    const toolTrace = [];
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const message = await requestCompletion(messages, tools, 'auto');
+      const message = await requestCompletion(messages, availableTools, 'auto');
       const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
       if (!calls.length) {
         return {
           systemId: system.system_id,
           operations,
           toolsUsed,
+          toolTrace,
           finalText: typeof message.content === 'string' ? message.content : ''
         };
       }
@@ -338,13 +390,16 @@
           throw new Error(system.system_id + ' 返回了不完整的工具调用记录。');
         }
         let result;
+        let traceArgs = null;
         try {
           const args = parseArguments(call);
-          result = executeTool(snapshot, system, operations, call.function.name, args);
+          traceArgs = clone(args);
+          result = executeTool(snapshot, system, operations, call.function.name, args, availableTools, requireReasons);
           toolsUsed.push(call.function.name);
         } catch (error) {
           result = { ok: false, error: error.message || String(error) };
         }
+        toolTrace.push({ name: call.function.name, args: traceArgs, result: clone(result) });
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
       }
     }
@@ -400,25 +455,65 @@
     throw new Error('未知的框架命令：' + command.type + '。');
   }
 
-  async function forwardInference(frame, requestCompletion, suffix) {
+  function withChangeAudit(frame, command) {
+    const audited = clone(command);
+    const system = command.system_id ? findSystem(frame, command.system_id) : null;
+    if (!system) return audited;
+    if (command.type === 'edit_parameter') {
+      const previous = system.parameters.find(item => item.param === command.name);
+      audited.change = {
+        field: 'parameters.' + command.name,
+        before: previous ? previous.value : null,
+        after: command.op === 'remove' ? null : command.value,
+        reason: command.reason || ''
+      };
+    } else if (command.type === 'set_statement') {
+      audited.change = { field: 'statement', before: system.statement, after: command.statement, reason: command.reason || '' };
+    } else if (command.type === 'set_time_clock') {
+      audited.change = { field: 'time_clock', before: system.time_clock, after: command.value, reason: command.reason || '' };
+    } else if (command.type === 'consume_events') {
+      audited.change = { field: 'events', before: system.events.length + ' 条事件', after: '已清空', reason: command.reason || '' };
+    }
+    return audited;
+  }
+
+  async function forwardInference(frame, requestCompletion, suffix, options) {
     validate(frame);
+    const interactionMode = Boolean(options && options.mode === 'agent_interaction');
+    const availableTools = interactionMode ? interactionTools : tools;
+    const interactionContext = interactionMode ? {
+      round: options.round,
+      researcher_prompt: options.researcherPrompt || '',
+      researcher_recipients: Array.isArray(options.researcherRecipients) ? options.researcherRecipients : [],
+      previous_round_messages: Array.isArray(options.previousRoundMessages) ? options.previousRoundMessages : []
+    } : null;
     const snapshot = clone(frame);
-    const settled = await Promise.allSettled(snapshot.systems.map(system => runSystem(snapshot, system, requestCompletion, suffix)));
+    const settled = await Promise.allSettled(snapshot.systems.map(system => runSystem(snapshot, system, requestCompletion, suffix, interactionContext, availableTools, interactionMode)));
     const failures = settled.filter(result => result.status === 'rejected');
     if (failures.length) {
-      const summary = failures.map(result => result.reason && result.reason.message || String(result.reason)).join('；');
+      const summary = failures.map(result => {
+        const failedIndex = settled.indexOf(result);
+        const failedSystem = snapshot.systems[failedIndex];
+        return (failedSystem ? failedSystem.system_id + '：' : '') + (result.reason && result.reason.message || String(result.reason));
+      }).join('；');
       throw new Error('框架回合全成全败：' + failures.length + ' 个系统未完成。' + summary);
     }
 
     const results = settled.map(result => result.value);
     const staged = clone(snapshot);
     const commandLog = [];
+    const messages = [];
     for (const result of results) {
       for (const operation of result.operations) {
         if (operation.type === 'deliver_event') continue;
+        if (operation.type === 'send_message') {
+          messages.push({ kind: 'directed', sender: result.systemId, recipients: clone(operation.target_system_ids), text: operation.message });
+          continue;
+        }
         const command = { ...clone(operation), system_id: result.systemId };
-        applyLoggedCommand(staged, command);
-        commandLog.push(command);
+        const audited = withChangeAudit(staged, command);
+        applyLoggedCommand(staged, audited);
+        commandLog.push(audited);
       }
     }
     for (const result of results) {
@@ -430,12 +525,19 @@
           target_system_id: operation.target_system_id,
           event: clone(operation.event)
         };
+        const target = findSystem(staged, operation.target_system_id);
+        const previousCount = target.events.length;
         applyLoggedCommand(staged, command);
+        command.change = { field: 'events', before: previousCount + ' 条事件', after: (previousCount + 1) + ' 条事件', reason: '定向事件送达；由收件 agent 下一轮处理' };
         commandLog.push(command);
+        messages.push({
+          kind: 'event', sender: result.systemId, recipients: [operation.target_system_id],
+          text: operation.event.event_description, delta_parameters: clone(operation.event.delta_parameters)
+        });
       }
     }
     validate(staged);
-    return { frame: staged, results, commandLog };
+    return { frame: staged, results, commandLog, messages };
   }
 
   function replay(anchor, commands, count) {
@@ -452,6 +554,7 @@
     MAX_TOOL_ROUNDS,
     MAX_SYSTEMS,
     tools,
+    interactionTools,
     clone,
     validate,
     normalize,
