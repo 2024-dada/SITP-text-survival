@@ -67,7 +67,7 @@
   }
 
   function safeText(value) {
-    return String(value).replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|gsk_[A-Za-z0-9_-]{16,})\b/g, '[API Key 已隐藏]');
+    return String(value).replace(/\b(?:mgk_live_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]{16,}|gsk_[A-Za-z0-9_-]{16,})\b/g, '[API Key 已隐藏]');
   }
 
   function parameterName(code) {
@@ -198,7 +198,7 @@
 
     const model = snapshot.model;
     const modelRows = [
-      ['服务商', 'resolveProvider()', model.provider + ' · ' + model.providerSelection],
+      ['Base URL 主机', 'aiBaseUrl.value', model.provider],
       ['API Key', 'aiApiKey.value', model.apiKeyConfigured ? '已填写 · 不显示密钥' : '未填写'],
       ['记住 Key', 'rememberApiKey.checked', model.rememberKey ? '已开启 · 保存在此浏览器' : '关闭 · 仅当前页面'],
       ['对话模型', 'aiModelName.value', model.modelName],
@@ -206,7 +206,7 @@
       ['API 余额', 'apiBalance.textContent', model.balance],
       ['连接状态', 'providerStatus.textContent', model.providerStatus]
     ];
-    root.append(platformCard('模型连接与调度', 'providerEndpoints / requestCompletion', modelRows));
+    root.append(platformCard('模型连接与调度', 'Base URL / requestCompletion', modelRows));
     updated.textContent = '实时更新 · ' + new Date().toLocaleTimeString();
   }
 

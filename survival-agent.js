@@ -48,7 +48,8 @@
   let lastAgentRoundError = '';
   let lastAgentRoundResults = [];
   const apiKeyStorageName = 'olorua.sitp.model-api-key';
-  const apiProviderStorageName = 'olorua.sitp.model-api-provider';
+  const apiBaseUrlStorageName = 'olorua.sitp.model-api-base-url';
+  const apiModelStorageName = 'olorua.sitp.model-api-model';
 
   const survivorAgentRule = '你是本次实验中的求生者 agent。只依据已经提供的文字、事件和自身状态交流，不补造岛屿参数、生理数值或事实。你只能修改当前 system 自己的 parameters、statement、events 和 time_clock；每项状态修改都必须说明 reason。time_clock 只是你自己的标注，不会推进岛屿模拟时钟。可用 send_message 定向给一个或多个 agent，收件人表示希望谁回应；所有 agent 下一轮都会看到上一轮完整发言。每轮所有 agent 并行处理同一份开始状态，不能看到同轮其他 agent 的结果。';
 
@@ -91,21 +92,24 @@
     try {
       if (key) localStorage.setItem(apiKeyStorageName, key);
       else localStorage.removeItem(apiKeyStorageName);
-      saveRememberedProvider();
+      saveRememberedConnection();
     } catch {
       el('rememberApiKey').checked = false;
       status('浏览器不允许保存本机密钥；本次仍可在当前页面使用。', 'error');
     }
   }
 
-  function saveRememberedProvider() {
+  function saveRememberedConnection() {
     if (!el('rememberApiKey').checked) return;
     try {
-      const provider = el('apiProvider').value;
-      if (provider === 'auto') localStorage.removeItem(apiProviderStorageName);
-      else localStorage.setItem(apiProviderStorageName, provider);
+      const baseUrl = el('aiBaseUrl').value.trim();
+      const model = el('aiModelName').value.trim();
+      if (baseUrl) localStorage.setItem(apiBaseUrlStorageName, baseUrl);
+      else localStorage.removeItem(apiBaseUrlStorageName);
+      if (model) localStorage.setItem(apiModelStorageName, model);
+      else localStorage.removeItem(apiModelStorageName);
     } catch {
-      // Provider preference is optional; a remembered API key remains usable this session.
+      // Connection details are optional; the key can still be used in this session.
     }
   }
 
@@ -113,7 +117,8 @@
     if (el('rememberApiKey').checked) { saveRememberedKey(); return; }
     try {
       localStorage.removeItem(apiKeyStorageName);
-      localStorage.removeItem(apiProviderStorageName);
+      localStorage.removeItem(apiBaseUrlStorageName);
+      localStorage.removeItem(apiModelStorageName);
     }
     catch { status('无法删除浏览器中已保存的Key；请在浏览器站点设置中清除此网页数据。', 'error'); }
   }
@@ -121,12 +126,14 @@
   function loadRememberedKey() {
     try {
       const key = localStorage.getItem(apiKeyStorageName);
-      const provider = localStorage.getItem(apiProviderStorageName);
       if (key) {
         el('aiApiKey').value = key;
+        el('aiBaseUrl').value = localStorage.getItem(apiBaseUrlStorageName) || '';
+        el('aiModelName').value = localStorage.getItem(apiModelStorageName) || '';
         el('rememberApiKey').checked = true;
-        if (provider && ['deepseek', 'openai', 'openrouter', 'groq'].includes(provider)) el('apiProvider').value = provider;
       }
+      localStorage.removeItem('olorua.sitp.model-api-provider');
+      updateConnectionStatus();
     } catch {
       status('浏览器不允许读取本机已保存的密钥；请重新输入。', 'error');
     }
@@ -220,15 +227,42 @@
     }
   }
 
+  function classifyApiError(statusCode, data, rawText, apiKey, label) {
+    let detail = '';
+    if (data && data.error) {
+      const error = data.error;
+      detail = [error.code, error.type, error.message].filter(value => typeof value === 'string').join(' ');
+    }
+    if (!detail && data && typeof data.message === 'string') detail = data.message;
+    if (!detail) detail = rawText || '';
+    if (apiKey) detail = String(detail).split(apiKey).join('[已隐藏密钥]');
+    const lower = detail.toLowerCase();
+    const code = data && data.error && typeof data.error.code === 'string' ? data.error.code.toLowerCase() : '';
+    const modelFailure = /model_not_found|unknown_model|invalid_model|model_not_available/.test(code)
+      || (/model/.test(lower) && /not found|does not exist|unknown|invalid|unavailable|not available|unsupported/.test(lower));
+    const balanceFailure = /insufficient_quota|insufficient_balance|billing_hard_limit|payment_required/.test(code)
+      || /insufficient[_ ](quota|balance)|quota (is )?exceeded|balance (is )?(insufficient|low)|out of credits|billing/.test(lower);
+    let reason;
+    if (statusCode === 401) reason = 'API Key 无效、已过期或未被服务接受。';
+    else if (statusCode === 402 || balanceFailure) reason = '账户余额不足或可用额度已用完。';
+    else if (statusCode === 403) reason = 'Key 已被服务识别，但没有调用此接口或模型的权限。';
+    else if (modelFailure) reason = '模型名称错误，或此 Key 没有该模型的使用权限。';
+    else if (statusCode === 404 && label === '模型列表读取') reason = '模型列表接口不可用或 Base URL 路径错误；若服务商文档不提供 /models，请手动填写模型名称后运行一轮。';
+    else if (statusCode === 404) reason = '接口地址错误或服务商没有提供该接口；请核对官方 Base URL。';
+    else if (statusCode === 429) reason = '请求过于频繁或并发已达限制；请稍后重试。';
+    else if (statusCode === 400) reason = '服务商拒绝了请求；请检查模型名、请求格式和接口文档。';
+    else if (statusCode >= 500) reason = '服务商接口暂时不可用（HTTP ' + statusCode + '）。';
+    else reason = '服务请求失败（HTTP ' + statusCode + '）。';
+    const safeDetail = String(detail).replace(/[\r\n\t]+/g, ' ').slice(0, 260);
+    return label + '失败：' + reason + (safeDetail ? ' 服务商说明：' + safeDetail : '');
+  }
+
   async function responseJson(response, apiKey, label) {
     const raw = await response.text();
-    let data;
-    try { data = JSON.parse(raw); } catch { throw new Error(label + '返回的不是 JSON（HTTP ' + response.status + '）。'); }
-    if (!response.ok) {
-      let message = data && data.error && data.error.message || data && data.message || 'HTTP ' + response.status;
-      if (apiKey) message = String(message).split(apiKey).join('[已隐藏密钥]');
-      throw new Error(label + '失败：' + String(message).slice(0, 500));
-    }
+    let data = null;
+    try { data = JSON.parse(raw); } catch { /* Non-JSON gateway errors are classified by HTTP status below. */ }
+    if (!response.ok) throw new Error(classifyApiError(response.status, data, data ? raw : '', apiKey, label));
+    if (!data) throw new Error(label + '成功连接，但服务返回的不是 JSON。请确认服务商接口协议。');
     return data;
   }
 
@@ -241,7 +275,6 @@
     const payload = {
       model: settings.model, messages, tools, tool_choice: choice, max_tokens: 1800, stream: false
     };
-    if (new URL(settings.endpoint).hostname.toLowerCase().endsWith('deepseek.com')) payload.thinking = { type: 'disabled' };
     const response = await fetchWithTimeout(settings.endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + settings.apiKey },
@@ -254,84 +287,100 @@
     return message;
   }
 
-  const providerEndpoints = {
-    deepseek: 'https://api.deepseek.com/chat/completions',
-    openai: 'https://api.openai.com/v1/chat/completions',
-    openrouter: 'https://openrouter.ai/api/v1/chat/completions',
-    groq: 'https://api.groq.com/openai/v1/chat/completions'
-  };
-  const providerNames = { deepseek: 'DeepSeek', openai: 'OpenAI', openrouter: 'OpenRouter', groq: 'Groq' };
-
-  function detectProviderFromKey(key) {
-    if (key.startsWith('sk-or-v1-')) return 'openrouter';
-    if (key.startsWith('gsk_')) return 'groq';
-    if (/^sk-(proj|svcacct)-/.test(key)) return 'openai';
-    return '';
+  function normalizeBaseUrl(rawValue) {
+    const raw = String(rawValue || '').trim();
+    if (!raw) throw new Error('请填写服务商官方文档提供的 Base URL。');
+    let url;
+    try { url = new URL(raw); } catch { throw new Error('Base URL 格式无效；请填写完整的 http:// 或 https:// 地址。'); }
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Base URL 只支持 http:// 或 https:// 地址。');
+    if (url.username || url.password) throw new Error('Base URL 不应包含用户名或密码；请只使用服务商文档提供的接口地址。');
+    if (url.search || url.hash) throw new Error('Base URL 不应包含查询参数或片段；请核对服务商文档。');
+    url.pathname = url.pathname.replace(/\/+$/g, '');
+    return url;
   }
 
-  function resolveProvider() {
+  function chatCompletionsEndpoint(rawBaseUrl) {
+    const url = normalizeBaseUrl(rawBaseUrl);
+    if (!/\/chat\/completions$/i.test(url.pathname)) {
+      const basePath = url.pathname === '/' ? '' : url.pathname;
+      url.pathname = basePath + '/chat/completions';
+    }
+    return url.href;
+  }
+
+  function resolveConnection() {
     const key = el('aiApiKey').value.trim();
-    const requested = el('apiProvider').value;
-    const provider = requested === 'auto' ? detectProviderFromKey(key) : requested;
+    const baseUrl = el('aiBaseUrl').value.trim();
     if (!key) {
-      el('providerStatus').textContent = '填写 Key 后自动识别服务商并获取模型。';
+      el('providerStatus').textContent = '请填写非空 API Key；不限制 Key 前缀或长度。';
       emitMonitorUpdate();
       return null;
     }
-    if (!provider) {
-      el('providerStatus').textContent = 'Key 格式未能唯一识别。请选择服务商；无需填写 API 地址。';
+    if (!baseUrl) {
+      el('providerStatus').textContent = '请填写服务商提供的 Base URL；系统不会根据 Key 前缀猜地址。';
       emitMonitorUpdate();
       return null;
     }
-    const endpoint = providerEndpoints[provider];
-    if (!endpoint) {
-      el('providerStatus').textContent = '暂不支持该服务商。';
+    try {
+      const endpoint = chatCompletionsEndpoint(baseUrl);
+      const host = new URL(endpoint).host;
+      el('providerStatus').textContent = '自定义服务 · ' + host + ' · Key 仅在测试、余额查询或模型调用时发送到此主机。';
+      emitMonitorUpdate();
+      return { provider: host, endpoint };
+    } catch (error) {
+      el('providerStatus').textContent = error.message || String(error);
       emitMonitorUpdate();
       return null;
     }
-    const recognition = requested === 'auto' ? '自动识别为 ' : '已选择 ';
-    el('providerStatus').textContent = recognition + providerNames[provider] + ' · 正在验证 Key 并读取模型';
+  }
+
+  function updateConnectionStatus() {
+    modelQuery += 1;
+    el('aiModelChoices').replaceChildren(new Option('请测试此地址或手动填写模型名', ''));
+    resolveConnection();
+    updateBalanceAvailability();
     emitMonitorUpdate();
-    return { provider, endpoint };
   }
 
   function getConnection() {
     const apiKey = el('aiApiKey').value.trim();
-    if (!apiKey) throw new Error('请先填写 API Key。');
-    const resolved = resolveProvider();
-    if (!resolved) throw new Error('无法自动识别此 Key；请选择服务商后重试，无需填写 API 地址。');
+    if (!apiKey) throw new Error('请填写非空 API Key。');
+    el('aiApiKey').value = apiKey;
+    const resolved = resolveConnection();
+    if (!resolved) throw new Error(el('providerStatus').textContent);
     return { apiKey, ...resolved };
   }
 
   function getSettings() {
     const connection = getConnection();
     const model = el('aiModelName').value.trim();
-    if (!model) throw new Error('请填写模型名，或先获取模型列表再选择。');
+    if (!model) throw new Error('请填写服务商提供的模型名称，或先测试连接并读取模型列表。');
+    el('aiModelName').value = model;
     return { ...connection, model };
   }
 
   function modelsEndpoint(chatEndpoint) {
     const url = new URL(chatEndpoint);
+    if (!/\/chat\/completions$/i.test(url.pathname)) throw new Error('无法从 Base URL 生成模型列表地址。');
     url.pathname = url.pathname.replace(/\/chat\/completions$/i, '/models');
     return url.href;
   }
 
-  async function connectFromKey() {
-    saveRememberedProvider();
-    if (!resolveProvider()) {
-      modelQuery += 1;
-      balanceQuery += 1;
-      el('aiModelChoices').replaceChildren(new Option('识别服务商后获取模型', ''));
-      el('apiBalance').textContent = '选择服务商并验证 Key 后查询余额；目前只支持 DeepSeek 官方 API。';
-      el('refreshBalance').disabled = false;
-      emitMonitorUpdate();
-      return;
-    }
-    await Promise.allSettled([discoverModels(), refreshBalance()]);
-  }
-
   let balanceQuery = 0;
   let modelQuery = 0;
+  function updateBalanceAvailability() {
+    balanceQuery += 1;
+    const baseUrl = el('aiBaseUrl').value.trim();
+    let supported = false;
+    if (baseUrl) {
+      try { supported = normalizeBaseUrl(baseUrl).hostname.toLowerCase() === 'api.deepseek.com'; }
+      catch { supported = false; }
+    }
+    el('apiBalance').textContent = supported
+      ? '仅查询 DeepSeek 官方 API 余额；点击“刷新 API 余额”手动查询。'
+      : '当前 Base URL 不支持余额查询；仅支持 DeepSeek 官方 API。';
+  }
+
   async function refreshBalance() {
     const query = ++balanceQuery;
     const output = el('apiBalance');
@@ -369,6 +418,7 @@
     try {
       const settings = getConnection();
       status('正在读取模型列表……');
+      el('providerStatus').textContent = '正在请求 ' + settings.provider + ' 的 OpenAI 兼容模型列表接口。';
       const response = await fetchWithTimeout(modelsEndpoint(settings.endpoint), {
         method: 'GET', headers: { Authorization: 'Bearer ' + settings.apiKey }
       }, '模型列表读取');
@@ -381,14 +431,15 @@
         select.append(new Option(item.name ? item.name + '（' + item.id + '）' : item.id, item.id));
       });
       if (select.options.length > 1) {
-        const preferred = [...select.options].find(option => option.value === el('aiModelName').value) || [...select.options].find(option => /deepseek-flash|gpt-4.1-mini|llama-3.3-70b/.test(option.value)) || select.options[1];
+        const preferred = [...select.options].find(option => option.value === el('aiModelName').value) || select.options[1];
         select.value = preferred.value;
-        el('aiModelName').value = preferred.value;
-        el('providerStatus').textContent = '已连接 ' + providerNames[settings.provider] + ' · ' + (select.options.length - 1) + ' 个可选模型';
+        if (!el('aiModelName').value.trim()) el('aiModelName').value = preferred.value;
+        el('providerStatus').textContent = '已连接 ' + settings.provider + ' · 读取到 ' + (select.options.length - 1) + ' 个模型';
       }
       status('读到 ' + (select.options.length - 1) + ' 个模型。列表不代表当前 Key 一定有调用权限。', 'ok');
     } catch (error) {
       if (query !== modelQuery) return;
+      el('providerStatus').textContent = error.message || String(error);
       select.replaceChildren(new Option('未获取到模型，可手动填写', ''));
       status(error.message + ' 仍可手动填写模型名。', 'error');
     } finally {
@@ -1166,11 +1217,15 @@
       });
     }
     const key = el('aiApiKey').value.trim();
-    const selectedProvider = el('apiProvider').value;
-    const detectedProvider = selectedProvider === 'auto' ? detectProviderFromKey(key) : selectedProvider;
-    const providerLabel = detectedProvider ? providerNames[detectedProvider] : selectedProvider === 'auto' ? '未识别' : '不支持';
+    const baseUrl = el('aiBaseUrl').value.trim();
+    let endpointHost = '未配置';
+    if (baseUrl) {
+      try { endpointHost = new URL(chatCompletionsEndpoint(baseUrl)).host; }
+      catch { endpointHost = 'Base URL 无效'; }
+    }
     const modelSelect = el('aiModelChoices');
     const modelCount = [...modelSelect.options].filter(option => option.value).length;
+    const modelName = el('aiModelName').value.trim();
     return {
       source: interactionSession ? '本次 Agent 会话' : session ? '本次单人生存实验' : selectedFrameworkFile,
       systems,
@@ -1190,11 +1245,10 @@
         realTimeDelta: frame ? frame.framework_param.real_time_delta : '未载入'
       },
       model: {
-        provider: providerLabel,
-        providerSelection: selectedProvider === 'auto' ? '自动识别' : '手动选择',
+        provider: endpointHost,
         apiKeyConfigured: Boolean(key),
         rememberKey: el('rememberApiKey').checked,
-        modelName: el('aiModelName').value.trim() || '未选择',
+        modelName: (key ? modelName.split(key).join('[已隐藏密钥]') : modelName) || '未选择',
         modelCount,
         providerStatus: el('providerStatus').textContent,
         balance: el('apiBalance').textContent
@@ -1324,15 +1378,19 @@
   el('exportFrameworkLog').addEventListener('click', exportFrameworkLog);
   el('frameworkReplayIndex').addEventListener('input', renderFrameworkReplay);
   el('exportReplaySnapshot').addEventListener('click', exportReplaySnapshot);
-  el('aiApiKey').addEventListener('input', () => { saveRememberedKey(); resolveProvider(); emitMonitorUpdate(); });
-  el('aiApiKey').addEventListener('change', connectFromKey);
-  el('apiProvider').addEventListener('change', connectFromKey);
+  el('aiApiKey').addEventListener('input', () => { saveRememberedKey(); updateConnectionStatus(); });
+  el('aiApiKey').addEventListener('change', saveRememberedKey);
+  el('aiBaseUrl').addEventListener('input', () => { saveRememberedConnection(); updateConnectionStatus(); });
+  el('aiBaseUrl').addEventListener('change', updateConnectionStatus);
   el('rememberApiKey').addEventListener('change', () => { handleRememberKeyChange(); emitMonitorUpdate(); });
   el('aiModelChoices').addEventListener('change', event => {
-    if (event.target.value) el('aiModelName').value = event.target.value;
+    if (event.target.value) {
+      el('aiModelName').value = event.target.value;
+      saveRememberedConnection();
+    }
     emitMonitorUpdate();
   });
-  el('aiModelName').addEventListener('input', emitMonitorUpdate);
+  el('aiModelName').addEventListener('input', () => { saveRememberedConnection(); emitMonitorUpdate(); });
   el('randomSeed').addEventListener('click', randomSeed);
   el('startExperiment').addEventListener('click', startExperiment);
   el('endExperiment').addEventListener('click', endExperiment);
@@ -1354,7 +1412,6 @@
   renderFramework();
   loadBundledAgentFramework();
   loadRememberedKey();
-  if (el('aiApiKey').value.trim()) connectFromKey();
   updateActionFields();
   updateAgentInteractionControls();
   keepIslandObserverReadOnly();
