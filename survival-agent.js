@@ -308,6 +308,24 @@
     return url.href;
   }
 
+  const modelGoBaseUrl = 'https://api.modelgo.ai/v1';
+  let modelDiscoveryTimer;
+  function isModelGoKey(key) { return /^mgk_\S+$/.test(key); }
+
+  function prepareAutomaticConnection(keyChanged = false) {
+    clearTimeout(modelDiscoveryTimer);
+    const key = el('aiApiKey').value.trim();
+    if (isModelGoKey(key) && (keyChanged || !el('aiBaseUrl').value.trim())) {
+      el('aiBaseUrl').value = modelGoBaseUrl;
+      if (keyChanged) el('aiModelName').value = '';
+      saveRememberedConnection();
+    }
+    updateConnectionStatus();
+    if (isModelGoKey(key) && el('aiBaseUrl').value.trim() === modelGoBaseUrl) {
+      modelDiscoveryTimer = setTimeout(discoverModels, 900);
+    }
+  }
+
   function resolveConnection() {
     const key = el('aiApiKey').value.trim();
     const baseUrl = el('aiBaseUrl').value.trim();
@@ -317,16 +335,17 @@
       return null;
     }
     if (!baseUrl) {
-      el('providerStatus').textContent = '请填写服务商提供的 Base URL；系统不会根据 Key 前缀猜地址。';
+      el('providerStatus').textContent = '未识别为 ModelGo Key；请在高级连接设置填写服务商官方 Base URL。';
       emitMonitorUpdate();
       return null;
     }
     try {
       const endpoint = chatCompletionsEndpoint(baseUrl);
       const host = new URL(endpoint).host;
-      el('providerStatus').textContent = '自定义服务 · ' + host + ' · Key 仅在测试、余额查询或模型调用时发送到此主机。';
+      const provider = isModelGoKey(key) && baseUrl === modelGoBaseUrl ? 'ModelGo' : host;
+      el('providerStatus').textContent = provider + ' · ' + host + ' · Key 仅发送到此主机。';
       emitMonitorUpdate();
-      return { provider: host, endpoint };
+      return { provider, endpoint };
     } catch (error) {
       el('providerStatus').textContent = error.message || String(error);
       emitMonitorUpdate();
@@ -335,6 +354,7 @@
   }
 
   function updateConnectionStatus() {
+    clearTimeout(modelDiscoveryTimer);
     modelQuery += 1;
     el('aiModelChoices').replaceChildren(new Option('请测试此地址或手动填写模型名', ''));
     resolveConnection();
@@ -410,6 +430,7 @@
   }
 
   async function discoverModels() {
+    clearTimeout(modelDiscoveryTimer);
     if (busy) return;
     const query = ++modelQuery;
     const select = el('aiModelChoices');
@@ -434,6 +455,7 @@
         const preferred = [...select.options].find(option => option.value === el('aiModelName').value) || select.options[1];
         select.value = preferred.value;
         if (!el('aiModelName').value.trim()) el('aiModelName').value = preferred.value;
+        saveRememberedConnection();
         el('providerStatus').textContent = '已连接 ' + settings.provider + ' · 读取到 ' + (select.options.length - 1) + ' 个模型';
       }
       status('读到 ' + (select.options.length - 1) + ' 个模型。列表不代表当前 Key 一定有调用权限。', 'ok');
@@ -1378,7 +1400,7 @@
   el('exportFrameworkLog').addEventListener('click', exportFrameworkLog);
   el('frameworkReplayIndex').addEventListener('input', renderFrameworkReplay);
   el('exportReplaySnapshot').addEventListener('click', exportReplaySnapshot);
-  el('aiApiKey').addEventListener('input', () => { saveRememberedKey(); updateConnectionStatus(); });
+  el('aiApiKey').addEventListener('input', () => { saveRememberedKey(); prepareAutomaticConnection(true); });
   el('aiApiKey').addEventListener('change', saveRememberedKey);
   el('aiBaseUrl').addEventListener('input', () => { saveRememberedConnection(); updateConnectionStatus(); });
   el('aiBaseUrl').addEventListener('change', updateConnectionStatus);
@@ -1412,6 +1434,7 @@
   renderFramework();
   loadBundledAgentFramework();
   loadRememberedKey();
+  prepareAutomaticConnection();
   updateActionFields();
   updateAgentInteractionControls();
   keepIslandObserverReadOnly();

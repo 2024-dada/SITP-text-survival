@@ -1,4 +1,4 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SITP · Agent 交互实验</title><link rel="stylesheet" href="style.css?v=4.4.0"><link rel="stylesheet" href="appearance.css?v=4.5.0"><script src="appearance.js?v=4.5.0"></script><script defer src="data.js?v=3.3.2"></script><script defer src="model.js?v=4.0.0"></script><script defer src="observation.js?v=3.3.2"></script><script defer src="app.js?v=4.0.0"></script><script defer src="body-framework.js?v=4.0.0"></script><script defer src="framework-runtime.js?v=4.3.0"></script><script defer src="survival-agent.js?v=4.4.0"></script><script defer src="monitor.js?v=4.4.0"></script></head><body>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SITP · Agent 交互实验</title><link rel="stylesheet" href="style.css?v=4.4.0"><link rel="stylesheet" href="appearance.css?v=4.5.0"><script src="appearance.js?v=4.5.0"></script><script defer src="data.js?v=3.3.2"></script><script defer src="model.js?v=4.0.0"></script><script defer src="observation.js?v=3.3.2"></script><script defer src="app.js?v=4.0.0"></script><script defer src="body-framework.js?v=4.0.0"></script><script defer src="framework-runtime.js?v=4.3.0"></script><script defer src="survival-agent.js?v=4.5.1"></script><script defer src="monitor.js?v=4.4.0"></script></head><body>
 <header><a class="brand" href="./"><span>◈</span><div>OLORUA<small>SITP · 文本生存 / 岛屿建模</small></div></a><div class="headRight"><span class="badge">Agent 逐轮交互</span><button id="help">使用说明</button><a href="https://github.com/2024-dada/SITP-text-survival" target="_blank" rel="noopener">GitHub ↗</a></div></header>
 <main><section class="intro"><div><div class="eyebrow">OLORUA AGENT WORKBENCH / 对话实验</div><h1>让求生者与岛屿 agent 对话。</h1><p>手动逐轮运行 · 同轮并行 · 状态变更附理由 · A/B/C 参数参考 Agent</p></div><div class="introNote">网站已附带本次提供的 A/B/C 参数参考框架并自动载入。模拟设定、缺失项和待组长确认状态照原样保留，不代表本岛实测；可在侧栏换载其他 Olorua JSON。</div></section>
 <div class="agentWorkbench">
@@ -31,16 +31,16 @@
   <details class="aiSettings"><summary>模型连接设置</summary>
     <div class="aiSettingsGrid">
       <label>API Key <input id="aiApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴服务商提供的 Key（不限制前缀）"></label>
-      <label>Base URL <input id="aiBaseUrl" type="text" autocomplete="url" spellcheck="false" placeholder="例如 https://api.example.com/v1"></label>
+      <label>高级连接 · Base URL <input id="aiBaseUrl" type="text" autocomplete="url" spellcheck="false" placeholder="ModelGo 自动配置；其他服务填写官方地址"></label>
       <label>对话模型 <input id="aiModelName" type="text" value="" autocomplete="off" spellcheck="false" placeholder="填写服务商提供的模型名称"></label>
-      <p id="providerStatus" role="status">填写 Key 与 Base URL；系统不会根据 Key 前缀猜测服务商或地址。</p>
+      <p id="providerStatus" role="status">粘贴 ModelGo Key 即可自动配置官方地址并获取模型；其他服务支持手动配置。</p>
       <label class="rememberKeyLabel"><span><input id="rememberApiKey" type="checkbox"> 记住Key</span></label>
       <button id="discoverModels" type="button">测试连接 / 获取模型</button>
       <div><button id="refreshBalance" type="button">刷新 API 余额</button><p id="apiBalance" role="status">尚未查询余额 · 支持 DeepSeek 官方 API</p></div>
       <label class="modelChoiceLabel">已发现模型 <select id="aiModelChoices"><option value="">可手动输入模型名</option></select></label>
     </div>
     <p class="aiPrivacy">默认只在当前页面内存使用。勾选“记住Key”会把 Key、Base URL 与模型名保存在此浏览器的本机存储中；调用时 Key 会发送到你填写的 Base URL 所属服务。只填写可信服务商的官方地址；同域网页脚本可能读取本机存储，共享电脑不要勾选。Key 不会写入存档或 GitHub。</p>
-    <p id="aiStatus" class="aiStatus" role="status">填写 API Key、Base URL 和模型名称。OpenAI 兼容服务可尝试读取模型列表；获取失败时仍可手动填写模型名。</p>
+    <p id="aiStatus" class="aiStatus" role="status">ModelGo Key（mgk_ 开头）自动连接 api.modelgo.ai 并获取模型。其他服务填写官方地址；列表获取失败时仍可手动填写模型名。模型须支持 Chat Completions 与工具调用。</p>
   </details>
   <details class="frameworkPanel">
     <summary>岛屿组 Agent JSON 与状态 <span id="frameworkSummary">未载入 JSON</span></summary>
