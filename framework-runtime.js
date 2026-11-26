@@ -1,8 +1,10 @@
 (function (G) {
   'use strict';
 
-  const MAX_TOOL_ROUNDS = Infinity;
   const MAX_SYSTEMS = 32;
+  const MAX_RECENT_TOOL_TURNS = 4;
+  const MAX_TOOL_RESULT_CHARS = 2400;
+  const MAX_PREVIOUS_ROUND_CONTEXT_CHARS = 8000;
 
   function makeTool(name, description, properties, required) {
     return {
@@ -67,7 +69,7 @@
     makeTool('consume_events', '清空当前系统已经处理的事件；必须说明清理原因。', {
       reason: { type: 'string' }
     }, ['reason']),
-    makeTool('send_message', '向一个或多个系统定向发送公开文本消息。收件对象表示希望谁回应，但不会停用其他系统；所有系统每轮都会参与并在下一轮看到完整对话。此工具不会修改收件系统的参数。', {
+    makeTool('send_message', '向一个或多个系统定向发送公开文本消息。收件对象表示希望谁回应，但不会停用其他系统；网页保存完整对话，下一轮发送给模型的历史内容受长度上限约束。此工具不会修改收件系统的参数。', {
       target_system_ids: { type: 'array', items: { type: 'string' } },
       message: { type: 'string' }
     }, ['target_system_ids', 'message'])
@@ -358,18 +360,110 @@
     return system.rule + (suffix ? '\n\n' + suffix : '');
   }
 
-  async function runSystem(snapshot, system, requestCompletion, suffix, context, availableTools, requireReasons) {
+  function shortenContextText(value, maxChars) {
+    if (value.length <= maxChars) return value;
+    const marker = '\n…中间内容已省略…\n';
+    const contentChars = Math.max(0, maxChars - marker.length);
+    const headChars = Math.ceil(contentChars * 0.6);
+    const tailChars = contentChars - headChars;
+    return value.slice(0, headChars) + marker + (tailChars ? value.slice(-tailChars) : '');
+  }
+
+  function compactPreviousRoundMessages(messages) {
+    const compact = messages.map(message => {
+      const item = { kind: message.kind, sender: message.sender };
+      if (Array.isArray(message.recipients)) item.recipients = message.recipients;
+      if (typeof message.text === 'string') item.text = message.text;
+      if (message.kind === 'state_change') {
+        item.field = message.field;
+        item.before = message.before;
+        item.after = message.after;
+        item.reason = message.reason || '';
+      }
+      return item;
+    });
+    if (compact.reduce((sum, item) => sum + JSON.stringify(item).length, 0) <= MAX_PREVIOUS_ROUND_CONTEXT_CHARS) return compact;
+
+    const note = { kind: 'context_note', sender: '网页', text: '完整上一轮对话保存在本地会话；为控制请求长度，本次仅发送最近内容。' };
+    let remaining = MAX_PREVIOUS_ROUND_CONTEXT_CHARS - JSON.stringify(note).length;
+    const recent = [];
+    for (let index = compact.length - 1; index >= 0 && remaining > 0; index -= 1) {
+      let item = compact[index];
+      let serialized = JSON.stringify(item);
+      if (serialized.length > remaining && typeof item.text === 'string') {
+        const fixedChars = serialized.length - item.text.length;
+        const textBudget = remaining - fixedChars;
+        if (textBudget < 48) continue;
+        item = { ...item, text: shortenContextText(item.text, textBudget) };
+        serialized = JSON.stringify(item);
+      }
+      if (serialized.length > remaining) continue;
+      recent.unshift(item);
+      remaining -= serialized.length;
+    }
+    return [note, ...recent];
+  }
+
+  function compactToolMessage(message) {
+    if (message.role !== 'tool' || typeof message.content !== 'string' || message.content.length <= MAX_TOOL_RESULT_CHARS) return message;
+    const headChars = 1600;
+    const tailChars = 420;
+    return {
+      ...message,
+      content: JSON.stringify({
+        truncated_for_model: true,
+        note: '完整工具结果保存在本地工具记录中；需要具体字段时请重新读取。',
+        preview_start: message.content.slice(0, headChars),
+        omitted_characters: message.content.length - headChars - tailChars,
+        preview_end: message.content.slice(-tailChars)
+      })
+    };
+  }
+
+  function summarizeOperation(operation) {
+    const type = operation && operation.type || 'unknown';
+    if (type === 'edit_parameter') return `${type} ${operation.name}=${String(operation.value).slice(0, 80)}`;
+    if (type === 'send_message') return `${type} -> ${(operation.target_system_ids || []).join(',')} (${String(operation.message || '').slice(0, 80)})`;
+    if (type === 'deliver_event') return `${type} -> ${operation.target_system_id} (${String(operation.event && operation.event.event_description || '').slice(0, 80)})`;
+    if (type === 'set_statement') return `${type} (${String(operation.statement || '').slice(0, 80)})`;
+    return type;
+  }
+
+  function requestMessagesForSystem(baseMessages, toolTurns, toolTrace, operations) {
+    const recentTurns = toolTurns.slice(-MAX_RECENT_TOOL_TURNS);
+    const recentCallCount = recentTurns.reduce((sum, turn) => sum + turn.callCount, 0);
+    const olderCallCount = Math.max(0, toolTrace.length - recentCallCount);
+    const messages = baseMessages.slice();
+    if (olderCallCount) {
+      const olderTrace = toolTrace.slice(0, olderCallCount).slice(-16);
+      const oldCalls = olderTrace.map(item => `${item.name}:${item.result && item.result.ok === false ? '未成功' : '已返回'}`).join('、');
+      const stagedOperations = operations.slice(-12).map(summarizeOperation).join('；');
+      const summary = [
+        '本轮较早的工具调用完整记录保存在本地；不要重复已完成的操作。',
+        oldCalls ? `较早工具：${oldCalls}` : '',
+        stagedOperations ? `已暂存操作：${stagedOperations}` : ''
+      ].filter(Boolean).join('\n').slice(-1800);
+      messages.push({ role: 'user', content: summary });
+    }
+    for (const turn of recentTurns) messages.push(...turn.messages.map(compactToolMessage));
+    return messages;
+  }
+
+  async function runSystem(snapshot, system, requestCompletion, suffix, context, availableTools, requireReasons, onToolTurn) {
     const initialState = systemState(snapshot, system);
     if (context) initialState.interaction_context = clone(context);
-    const messages = [
+    const baseMessages = [
       { role: 'system', content: systemPrompt(system, suffix) },
       { role: 'user', content: JSON.stringify(initialState) }
     ];
+    const toolTurns = [];
+    let toolRoundCount = 0;
     const operations = [];
     const toolsUsed = [];
     const toolTrace = [];
     while (true) {
-      const message = await requestCompletion(messages, availableTools, 'auto');
+      const requestMessages = requestMessagesForSystem(baseMessages, toolTurns, toolTrace, operations);
+      const message = await requestCompletion(requestMessages, availableTools, 'auto', system.system_id);
       const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
       if (!calls.length) {
         return {
@@ -377,14 +471,17 @@
           operations,
           toolsUsed,
           toolTrace,
-          finalText: typeof message.content === 'string' ? message.content : ''
+          finalText: typeof message.content === 'string' ? message.content : '',
+          responseSegments: Array.isArray(message._responseSegments) ? message._responseSegments.slice() : []
         };
       }
-      messages.push({
+      toolRoundCount += 1;
+      if (onToolTurn) onToolTurn(system.system_id, toolRoundCount, calls.length);
+      const turnMessages = [{
         role: 'assistant',
         content: message.content === undefined ? null : message.content,
         tool_calls: calls.map(call => ({ id: call.id, type: 'function', function: call.function }))
-      });
+      }];
       for (const call of calls) {
         if (!call.id || call.type !== 'function' || !call.function || typeof call.function.name !== 'string') {
           throw new Error(system.system_id + ' 返回了不完整的工具调用记录。');
@@ -400,8 +497,10 @@
           result = { ok: false, error: error.message || String(error) };
         }
         toolTrace.push({ name: call.function.name, args: traceArgs, result: clone(result) });
-        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
+        turnMessages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
       }
+      toolTurns.push({ messages: turnMessages, callCount: calls.length });
+      if (toolTurns.length > MAX_RECENT_TOOL_TURNS) toolTurns.shift();
     }
   }
 
@@ -484,10 +583,11 @@
       round: options.round,
       researcher_prompt: options.researcherPrompt || '',
       researcher_recipients: Array.isArray(options.researcherRecipients) ? options.researcherRecipients : [],
-      previous_round_messages: Array.isArray(options.previousRoundMessages) ? options.previousRoundMessages : []
+      previous_round_messages: compactPreviousRoundMessages(Array.isArray(options.previousRoundMessages) ? options.previousRoundMessages : [])
     } : null;
+    const onToolTurn = interactionMode && typeof options.onToolTurn === 'function' ? options.onToolTurn : null;
     const snapshot = clone(frame);
-    const settled = await Promise.allSettled(snapshot.systems.map(system => runSystem(snapshot, system, requestCompletion, suffix, interactionContext, availableTools, interactionMode)));
+    const settled = await Promise.allSettled(snapshot.systems.map(system => runSystem(snapshot, system, requestCompletion, suffix, interactionContext, availableTools, interactionMode, onToolTurn)));
     const failures = settled.filter(result => result.status === 'rejected');
     if (failures.length) {
       const summary = failures.map(result => {
@@ -550,7 +650,6 @@
   }
 
   G.SITPFrameworkRuntime = Object.freeze({
-    MAX_TOOL_ROUNDS,
     MAX_SYSTEMS,
     tools,
     interactionTools,

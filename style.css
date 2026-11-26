@@ -57,6 +57,7 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 .agentRosterHead{display:flex;flex-direction:column;gap:4px}
 .agentRosterHead>span{font-weight:600}
 .agentRosterHead strong{color:#68806c;font-size:10px;font-weight:500}
+.agentToolTurnCount{display:inline-flex;align-items:center;width:max-content;max-width:100%;padding:4px 8px;border:1px solid #d5e1d0;border-radius:999px;background:#eff4ec;color:#294a3c;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.4}
 .agentRosterList{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
 .agentRosterTag{max-width:100%;padding:5px 9px;border:1px solid #d5e1d0;border-radius:999px;background:#eff4ec;color:#365541;font-size:11px;overflow-wrap:anywhere}
 .agentRosterEmpty{color:#819078;font-size:11px}
