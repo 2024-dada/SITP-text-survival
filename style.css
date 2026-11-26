@@ -43,7 +43,7 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 .previewCard.previewKind-text{font-size:17px;line-height:1.9;padding:18px;border:1px solid #dbe4d4;border-radius:10px;background:#fffef9}
 .previewCard.previewKind-role{white-space:pre-wrap}
 
-/* Single-survivor AI experiment prototype */
+/* Single-survivor experiment and reasoning framework */
 .survivalPanel{margin:18px 0;padding:18px 20px;border:1px solid #d9e1d2;background:#fbfcf8;}
 .survivalPanel .panelHead{align-items:flex-start;gap:16px;}
 .survivalPanel .panelHead h2{margin:0 0 5px;color:#294a3c;}
@@ -70,6 +70,28 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 .aiStatus{min-height:1.3em;}
 .aiStatus[data-kind="error"]{color:#a13e31;}
 .aiStatus[data-kind="ok"]{color:#2d6b45;}
+.frameworkPanel{margin:10px 0;padding:10px 12px;border:1px solid #d8e2d4;border-radius:10px;background:#f6f8f3;}
+.frameworkPanel>summary,.frameworkStateDetails>summary,.frameworkReplayDetails>summary{cursor:pointer;font-weight:700;color:#365646;}
+#frameworkSummary{margin-left:8px;color:#718176;font-size:.84rem;font-weight:500;}
+.frameworkToolbar{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin-top:12px;}
+.frameworkToolbar label{display:flex;flex-direction:column;gap:5px;color:#41594d;font-size:.88rem;}
+.frameworkToolbar input[type="file"]{max-width:250px;min-height:36px;padding:6px;border:1px solid #cdd7ca;border-radius:8px;background:#fff;color:#263e32;font:inherit;}
+.frameworkReplayLabel{flex:1 1 240px;}
+.frameworkReplayLabel input{width:100%;accent-color:#456c52;}
+#frameworkReplayCount{color:#65766b;font-size:.8rem;}
+.frameworkStatus,.frameworkNotice{margin:8px 0 0;color:#65766b;font-size:.82rem;line-height:1.5;}
+.frameworkStatus[data-kind="error"]{color:#a13e31;}
+.frameworkStatus[data-kind="ok"]{color:#2d6b45;}
+.frameworkNotice{padding:8px 10px;border-radius:8px;background:#eef3e9;}
+.frameworkEditorDetails{margin-top:10px;}
+#frameworkEditor{display:block;width:100%;box-sizing:border-box;min-height:220px;margin:8px 0;padding:10px;border:1px solid #cdd7ca;border-radius:8px;background:#fff;color:#283d31;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;resize:vertical;}
+.frameworkClockDetails{margin-top:10px;}
+.frameworkClockEditors{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:8px;}
+.frameworkClockRow{display:flex;align-items:end;gap:6px;padding:8px;border:1px solid #e0e6dc;border-radius:8px;background:#fff;}
+.frameworkClockRow label{display:flex;flex:1;flex-direction:column;gap:4px;color:#41594d;font-size:.82rem;}
+.frameworkClockRow input{width:100%;box-sizing:border-box;min-height:34px;padding:6px 8px;border:1px solid #cdd7ca;border-radius:7px;font:inherit;}
+.frameworkStateDetails,.frameworkReplayDetails{margin-top:10px;}
+#frameworkState,#frameworkReplay{max-height:420px;overflow:auto;margin:8px 0 0;padding:12px;border:1px solid #e0e6dc;border-radius:8px;background:#fff;color:#283d31;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;}
 .simControls{margin-top:14px;padding-top:14px;border-top:1px solid #e0e6dc;}
 .simControls[hidden],.actionFields[hidden]{display:none!important;}
 .actionComposer{align-items:end;}
@@ -87,4 +109,4 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 .dialogueSpeaker{display:block;margin-bottom:3px;color:#617468;font-size:.78rem;font-weight:700;}
 .dialogueText{white-space:pre-wrap;overflow-wrap:anywhere;color:#263b30;line-height:1.55;}
 .emptyLog{margin:0;color:#7b897e;}
-@media(max-width:720px){.survivalPanel{padding:14px}.simSetup>*{flex:1 1 100%}.simSetup button{flex:1 1 45%}.actionComposer>label:first-child{flex:1 1 100%}.actionFields{flex:1 1 100%}.actionFields label{flex:1 1 42%}.aiSettingsGrid label{flex:1 1 100%!important}.simLog{max-height:300px}}
+@media(max-width:720px){.survivalPanel{padding:14px}.simSetup>*{flex:1 1 100%}.simSetup button{flex:1 1 45%}.actionComposer>label:first-child{flex:1 1 100%}.actionFields{flex:1 1 100%}.actionFields label{flex:1 1 42%}.aiSettingsGrid label{flex:1 1 100%!important}.frameworkToolbar>*{flex:1 1 100%}.frameworkToolbar button{width:100%}.simLog{max-height:300px}}

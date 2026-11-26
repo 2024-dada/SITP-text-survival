@@ -1,6 +1,6 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SITP · 岛屿观测台</title><link rel="stylesheet" href="style.css?v=4.0.0"><script defer src="data.js?v=3.3.2"></script><script defer src="model.js?v=4.0.0"></script><script defer src="observation.js?v=3.3.2"></script><script defer src="app.js?v=4.0.0"></script><script defer src="body-framework.js?v=4.0.0"></script><script defer src="survival-agent.js?v=4.0.0"></script></head><body>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SITP · 岛屿观测台</title><link rel="stylesheet" href="style.css?v=4.1.0"><script defer src="data.js?v=3.3.2"></script><script defer src="model.js?v=4.0.0"></script><script defer src="observation.js?v=3.3.2"></script><script defer src="app.js?v=4.0.0"></script><script defer src="body-framework.js?v=4.0.0"></script><script defer src="framework-runtime.js?v=4.1.0"></script><script defer src="survival-agent.js?v=4.1.0"></script></head><body>
 <header><a class="brand" href="./"><span>◈</span><div>OLORUA<small>SITP · 文本生存 / 岛屿建模</small></div></a><div class="headRight"><span class="badge">浏览器独立实验</span><button id="help">使用说明</button><a href="https://github.com/2024-dada/SITP-text-survival" target="_blank" rel="noopener">GitHub ↗</a></div></header>
-<main><section class="intro"><div><div class="eyebrow">ISLAND OBSERVATORY / 第二阶段</div><h1>把一个位置，读成一个世界。</h1><p>悬停预览 · 点击固定 · 六个方向同时观察 · 雨带约2小时过岛 · 可按15分钟观察</p></div><div class="introNote">地图基线 v3.3.2 · 836个20米细分格 / 219个资源地带。山羊30只、陆鸟合并群体500只、贝类1256只均为模拟初值。新增单人生存实验为未发布的 v4.0 原型。<br>生态与繁衍参数是模拟设定；降雨开始时刻按日期与种子变化；1 m 是定位步长，非实测精度。</div></section>
+<main><section class="intro"><div><div class="eyebrow">ISLAND OBSERVATORY / 第二阶段</div><h1>把一个位置，读成一个世界。</h1><p>悬停预览 · 点击固定 · 六个方向同时观察 · 雨带约2小时过岛 · 可按15分钟观察</p></div><div class="introNote">地图基线 v3.3.2 · 836个20米细分格 / 219个资源地带。山羊30只、陆鸟合并群体500只、贝类1256只均为模拟初值。单人生存实验 v4.0 已在主线；通用推理框架扩展目前仅在本地功能分支。<br>生态与繁衍参数是模拟设定；降雨开始时刻按日期与种子变化；1 m 是定位步长，非实测精度。</div></section>
 <section class="panel survivalPanel" aria-labelledby="survivalHeading">
   <div class="panelHead"><div><h2 id="survivalHeading">单人生存实验 · 动作解析与身体框架</h2><small>观测者选择动作；AI不替你做生存决策。岛屿数值由网站规则结算，身体系统采用对方提供的示例推理框架。</small></div><strong id="simStatus" class="simStatus">未开始</strong></div>
   <div class="simSetup">
@@ -19,6 +19,22 @@
     </div>
     <p class="aiPrivacy">默认只在当前页面内存使用，刷新后清空。勾选“记住Key”会把密钥保存在此浏览器的本机存储中；调用时会发送给所选模型服务商。该存储按网页域名共享，同域网页脚本可能读取；共享电脑不要勾选。Key不会写入存档或GitHub。</p>
     <p id="aiStatus" class="aiStatus" role="status">等待填写API Key。模型列表获取失败时可直接填写模型名。</p>
+  </details>
+  <details class="frameworkPanel">
+    <summary>推理框架 <span id="frameworkSummary">读取内置框架…</span></summary>
+    <div class="frameworkToolbar">
+      <label class="frameworkImport">载入框架 JSON <input id="frameworkFile" type="file" accept="application/json,.json"></label>
+      <button id="exportFramework" type="button">导出当前快照</button>
+      <button id="exportFrameworkLog" type="button" disabled>导出命令记录</button>
+      <label class="frameworkReplayLabel">回放到命令 <input id="frameworkReplayIndex" type="range" min="0" max="0" value="0" disabled><span id="frameworkReplayCount">0 / 0</span></label>
+      <button id="exportReplaySnapshot" type="button" disabled>导出此步快照</button>
+    </div>
+    <p id="frameworkStatus" class="frameworkStatus">可载入符合 Olorua 框架格式的 JSON；每轮可运行1—32个系统。</p>
+    <p class="frameworkNotice">框架中的 rule 会作为系统提示发送给你选择的模型服务商。只载入你信任的框架文件。网站每轮会把岛屿端实际提供的环境量写入 external；未由岛屿端提供的导入参数保留为框架实验设定，不表示本岛实测。API Key 不会写进快照或命令记录。</p>
+    <details class="frameworkEditorDetails"><summary>直接编辑框架 JSON</summary><textarea id="frameworkEditor" rows="14" spellcheck="false" aria-label="推理框架 JSON"></textarea><button id="applyFrameworkEditor" type="button">应用框架 JSON</button></details>
+    <details class="frameworkClockDetails"><summary>系统 time_clock 标注（不会自动推进）</summary><div id="frameworkClockEditors" class="frameworkClockEditors"></div></details>
+    <details class="frameworkStateDetails"><summary>查看当前框架状态 JSON</summary><pre id="frameworkState">尚未开始实验。</pre></details>
+    <details class="frameworkReplayDetails"><summary>查看所选命令后的回放状态</summary><pre id="frameworkReplay">开始实验后可按命令序号回放。</pre></details>
   </details>
   <div id="simControls" class="simControls" hidden>
     <div class="actionComposer">
@@ -52,5 +68,5 @@
 <section class="panel forecastPanel"><div class="panelHead"><div><h2>观察点未来 24 小时 · 合成天气</h2><small>预报式界面；是实验生成的时间序列，不是真实天气预报。</small></div><div id="currentWeather"></div></div><div class="forecast" id="forecast"></div></section>
 <section class="bottomGrid"><div class="panel"><div class="panelHead"><h2>岛屿账本</h2><span>研究者可见</span></div><div class="waterStats" id="waterStats"></div><h3 class="ecoTitle">生态循环 · 模拟食源与族群</h3><div id="ecoStats" class="ecoGrid"></div><div id="stockTable"></div></div><div class="panel"><div class="panelHead"><h2>变化记录</h2><span>仅保留最近100条</span></div><div id="events"></div><div class="docLinks"><a href="docs/区域.md" target="_blank">区域文本 ↗</a><a href="docs/气候.md" target="_blank">气候文本 ↗</a><a href="docs/规则.md" target="_blank">规则文本 ↗</a></div></div></section>
 <footer><span>数据参考：OSM岸线 · FMS Lakeba温雨 · GLO90高程采样</span><span>静态页面 · 生存实验通过浏览器直连模型API · 身体示例不代表临床数据 / 观测算法 obs-dir-v4</span></footer></main>
-<dialog id="guide"><h2>地图怎么用</h2><p>鼠标移动到陆地上，右侧六个方框一起更新。单击固定观察点；点“鼠标预览”恢复跟随。鼠标放在地图上滚轮向上放大、向下缩小，以鼠标位置为中心，最大12倍；点地图右上角“全岛”复位，不改变时间与库存。放大超过1.05倍后，按住鼠标左键拖动地图；拖动不推进时间、不改变库存；固定观察点保持原位，鼠标预览模式会在松开后更新为指针下的新位置。拖动不会触发点击固定。Ctrl＋滚轮仍用于浏览器缩放。地图获得焦点后，方向键每次移动约1米。蓝灰雨带从东向西移动，约2小时扫过岛屿；点“下一场雨”可定位雨带抵达前的时刻。</p><p>时间按钮会真正更新资源、水源和材料状态。自动模式每秒推进15分钟；切换到后台时暂停，不按现实时间追赶。保存可导出JSON，关闭页面不自行演化。</p><p>开始生存实验后，选择移动、采集或休息，再点“发送操作”。动作会先交给模型整理，岛屿规则结算后，身体框架依次处理环境系统和其他身体系统；全部成功才统一推进时间。采集进入本次实验的随身物品，不会自动吃喝。模型状态是研究演示，不是临床结论。</p><p>地形是粗采样插值，836个细分格、219个资源地带及植物分布是设计；太阳按本地近似太阳时计算。山羊、陆鸟合并群体和贝类数量均为模拟初值。生态面板会显示五类生物的幼体、青年/稚体、亚成体与成体/繁殖阶段，以及食源消耗与恢复、动态承载量和独立硬上限。缺少本岛实测的数值均为模拟参数；食源池是生态折算量，不能当作角色可直接采集的物资。成体暂按有繁殖能力处理，不模拟性别、配偶或繁殖季节。雨势、昼夜和潮位在六向卡上方只完整说一次；每张方向卡只写该方向实际可见的近、中、远景。点击任一方向卡、天气时段卡、水量卡、资源信息卡或生态卡可打开文字放大预览；滚轮以卡片中心缩放，点击卡片外关闭。放大只用于阅读，不暂停模拟时间。方位、数量、雨量等后台值不直接等同角色知识。</p><button id="closeHelp">知道了</button></dialog>
+<dialog id="guide"><h2>地图怎么用</h2><p>鼠标移动到陆地上，右侧六个方框一起更新。单击固定观察点；点“鼠标预览”恢复跟随。鼠标放在地图上滚轮向上放大、向下缩小，以鼠标位置为中心，最大12倍；点地图右上角“全岛”复位，不改变时间与库存。放大超过1.05倍后，按住鼠标左键拖动地图；拖动不推进时间、不改变库存；固定观察点保持原位，鼠标预览模式会在松开后更新为指针下的新位置。拖动不会触发点击固定。Ctrl＋滚轮仍用于浏览器缩放。地图获得焦点后，方向键每次移动约1米。蓝灰雨带从东向西移动，约2小时扫过岛屿；点“下一场雨”可定位雨带抵达前的时刻。</p><p>时间按钮会真正更新资源、水源和材料状态。自动模式每秒推进15分钟；切换到后台时暂停，不按现实时间追赶。保存可导出JSON，关闭页面不自行演化。</p><p>开始生存实验后，选择移动、采集或休息，再点“发送操作”。动作会先交给模型整理，岛屿规则结算后，框架内所有系统从同一份回合起始状态并行推理；所有系统成功后才统一提交。跨系统新事件从下一回合开始生效。采集进入本次实验的随身物品，不会自动吃喝。模型状态是研究演示，不是临床结论。</p><p>地形是粗采样插值，836个细分格、219个资源地带及植物分布是设计；太阳按本地近似太阳时计算。山羊、陆鸟合并群体和贝类数量均为模拟初值。生态面板会显示五类生物的幼体、青年/稚体、亚成体与成体/繁殖阶段，以及食源消耗与恢复、动态承载量和独立硬上限。缺少本岛实测的数值均为模拟参数；食源池是生态折算量，不能当作角色可直接采集的物资。成体暂按有繁殖能力处理，不模拟性别、配偶或繁殖季节。雨势、昼夜和潮位在六向卡上方只完整说一次；每张方向卡只写该方向实际可见的近、中、远景。点击任一方向卡、天气时段卡、水量卡、资源信息卡或生态卡可打开文字放大预览；滚轮以卡片中心缩放，点击卡片外关闭。放大只用于阅读，不暂停模拟时间。方位、数量、雨量等后台值不直接等同角色知识。</p><button id="closeHelp">知道了</button></dialog>
 <dialog id="textPreview" class="textPreview" aria-labelledby="textPreviewHeading"><div class="previewShell"><div class="previewTop"><div><h2 id="textPreviewHeading">文字放大预览</h2><span id="textPreviewZoom" aria-live="polite">100%</span></div><button id="closeTextPreview" type="button">关闭</button></div><div id="textPreviewStage" class="previewStage"><div id="textPreviewBody" class="previewBody"></div></div><p class="previewHint">滚轮以预览卡片中心缩放 · 点击卡片外关闭 · 内容取打开时刻</p></div></dialog></body></html>
