@@ -2,8 +2,8 @@
   'use strict';
 
   const M = G.IslandModel;
+  const R = G.SITPFrameworkRuntime;
   const el = id => document.getElementById(id);
-  const SYSTEM_IDS = ['external', 'thermoregulation', 'cardiovascular', 'respiratory'];
   const PARAMETER_LABELS = {
     core_temp_c: '核心体温（℃）', skin_blood_flow_ml_min: '皮肤血流（ml/min）',
     shivering_heat_ml_min: '寒战产热（示例值）', sweat_rate_ml_h: '出汗（ml/h）',
@@ -34,45 +34,15 @@
     }
   };
 
-  function makeTool(name, description, properties, required) {
-    return {
-      type: 'function',
-      function: {
-        name, description,
-        parameters: { type: 'object', properties, required, additionalProperties: false }
-      }
-    };
-  }
-  const frameworkTools = [
-    makeTool('list_systems', '列出身体框架内的系统编号、状态和参数名。', {}, []),
-    makeTool('read_system', '读取一个系统本轮开始时的状态。', { system_id: { type: 'string' } }, ['system_id']),
-    makeTool('edit_parameters', '为当前负责的系统排队添加、修改或删除参数；变化只在该系统推理结束后应用。', {
-      ops: { type: 'array', items: { type: 'object', properties: {
-        op: { type: 'string', enum: ['add', 'change', 'remove'] }, name: { type: 'string' }, value: { type: 'number' }
-      }, required: ['op', 'name', 'value'], additionalProperties: false } }
-    }, ['ops']),
-    makeTool('deliver_event', '排队向另一个身体系统发送事件；身体系统之间本轮新发出的事件在下一回合读取。', {
-      target_system_id: { type: 'string' }, event_description: { type: 'string' },
-      delta_parameters: { type: 'array', items: { type: 'object', properties: {
-        name: { type: 'string' }, value: { type: 'number' }
-      }, required: ['name', 'value'], additionalProperties: false } }
-    }, ['target_system_id', 'event_description', 'delta_parameters']),
-    makeTool('consume_events', '排队清空当前负责系统已经处理的事件。', {}, []),
-    makeTool('set_statement', '排队更新当前负责系统给研究者看的简短文字状态。', { statement: { type: 'string' } }, ['statement']),
-    makeTool('math_eval', '计算只包含数字、变量、括号及 + - * / ^ 或 ** 的数学表达式。', {
-      expression: { type: 'string' },
-      variables: { type: 'array', items: { type: 'object', properties: {
-        name: { type: 'string' }, value: { type: 'number' }
-      }, required: ['name', 'value'], additionalProperties: false } }
-    }, ['expression', 'variables'])
-  ];
-
   let session = null;
+  let selectedFramework = null;
+  let selectedFrameworkFile = '内置框架';
   let busy = false;
   let modelCalls = 0;
   let visibleLines = 0;
   let roundActive = false;
   let roundCalls = 0;
+  let roundCallsLimit = 0;
   const apiKeyStorageName = 'olorua.sitp.model-api-key';
 
   function say(role, text) {
@@ -146,6 +116,7 @@
     document.querySelectorAll('.actionComposer select, #startExperiment, #randomSeed').forEach(input => { input.disabled = value || Boolean(session && session.pendingAction); });
     document.querySelectorAll('.aiSettingsGrid input, .aiSettingsGrid select, #discoverModels').forEach(input => { input.disabled = value; });
     el('endExperiment').disabled = value;
+    updateFrameworkControls();
   }
 
   function lockResearchControls(locked) {
@@ -213,7 +184,7 @@
   }
 
   async function requestCompletion(settings, messages, tools, choice) {
-    if (roundActive && roundCalls >= 32) throw new Error('本轮模型请求达到32次上限；为控制调用量，岛屿和身体状态均未提交。');
+    if (roundActive && roundCalls >= roundCallsLimit) throw new Error('本轮模型请求达到框架系统数对应的上限；岛屿和身体状态均未提交。');
     if (roundActive) roundCalls += 1;
     modelCalls += 1;
     el('modelCallCount').textContent = String(modelCalls);
@@ -258,19 +229,11 @@
   }
 
   function validateBodyFramework(frame) {
-    if (!frame || !frame.framework_param || !Number.isFinite(frame.framework_param.time_delta) || !Number.isFinite(frame.framework_param.real_time_delta) || !Array.isArray(frame.systems)) throw new Error('身体框架文件缺少合法的 framework_param 或 systems 列表。');
-    const ids = frame.systems.map(system => system.system_id);
-    if (ids.length !== SYSTEM_IDS.length || new Set(ids).size !== ids.length || SYSTEM_IDS.some(id => !ids.includes(id))) throw new Error('身体框架系统与网页当前接入的系统不完全一致，或系统编号重复。');
-    for (const system of frame.systems) {
-      if (typeof system.rule !== 'string' || !system.rule || !Array.isArray(system.parameters) || !Array.isArray(system.events) || !Number.isFinite(system.time_clock) || typeof system.statement !== 'string') throw new Error('身体框架 ' + system.system_id + ' 的规则、时钟、状态文字、参数或事件格式不完整。');
-      const names = system.parameters.map(parameter => parameter.param);
-      if (new Set(names).size !== names.length) throw new Error('身体框架 ' + system.system_id + ' 中有重复参数名。');
-      for (const parameter of system.parameters) if (typeof parameter.param !== 'string' || !parameter.param || !Number.isFinite(parameter.value)) throw new Error('身体框架 ' + system.system_id + ' 存在不合法参数。');
-      for (const event of system.events) if (!event || typeof event.event_description !== 'string' || !Array.isArray(event.delta_parameters)) throw new Error('身体框架 ' + system.system_id + ' 存在不合法事件。');
-    }
+    if (!R) throw new Error('没有读取到 framework-runtime.js。');
+    return R.validate(frame);
   }
 
-  function cloneJson(value) { return JSON.parse(JSON.stringify(value)); }
+  function cloneJson(value) { return R.clone(value); }
 
   function formatClock(world) {
     const date = M.weather(world.hour, world.seed).date;
@@ -464,201 +427,66 @@
     };
   }
 
-  function systemState(frame, system) {
-    return {
-      system_id: system.system_id,
-      framework_param: { time_delta: frame.framework_param.time_delta },
-      time_clock: system.time_clock, parameters: system.parameters,
-      statement: system.statement, events: system.events
-    };
-  }
-
-  async function runBodySystem(settings, frame, systemId) {
-    const system = frame.systems.find(item => item.system_id === systemId);
-    const initial = cloneJson(systemState(frame, system));
-    const commands = { parameterOps: [], events: [], statement: null, consumeEvents: false };
-    const messages = [
-      { role: 'system', content: system.rule + '\n\n网页移植约定：time_delta 与 time_clock 单位均为分钟；当前回合时长已写在 framework_param.time_delta 中。带“岛屿端本轮上下文”且 delta_parameters 为空的事件只提供环境/动作事实，不代表量化的人体变化。只通过工具提交当前系统的修改；不得诊断疾病、决定死亡或编造未提供的风速/空气湿度。' },
-      { role: 'user', content: JSON.stringify(initial) }
-    ];
-    for (let round = 0; round < 6; round++) {
-      const message = await requestCompletion(settings, messages, frameworkTools, 'auto');
-      const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-      if (calls.length > 12) throw new Error(systemId + ' 单次响应的工具调用超过12项上限，未提交本轮。');
-      if (!calls.length) {
-        if (commands.statement === null) throw new Error(systemId + ' 没有调用 set_statement，未提交状态。');
-        if (initial.events.length && !commands.consumeEvents) throw new Error(systemId + ' 没有处理并清空本轮事件，未提交状态。');
-        return { systemId, commands, finalText: typeof message.content === 'string' ? message.content : '' };
-      }
-      messages.push({ role: 'assistant', content: message.content === undefined ? null : message.content, tool_calls: calls.map(call => ({ id: call.id, type: 'function', function: call.function })) });
-      for (const call of calls) {
-        if (!call.id || call.type !== 'function') throw new Error(systemId + ' 返回了不完整的工具调用记录。');
-        const args = parseArguments(call);
-        const result = executeBodyTool(frame, system, commands, call.function.name, args);
-        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
-      }
-    }
-    throw new Error(systemId + ' 连续调用工具达到6轮上限，未完成本轮。');
-  }
-
-  function executeBodyTool(frame, self, commands, name, args) {
-    const systems = frame.systems;
-    const findSystem = id => systems.find(system => system.system_id === id);
-    if (name === 'list_systems') return { ok: true, systems: systems.map(system => ({
-      system_id: system.system_id, statement: system.statement, parameters: system.parameters.map(parameter => parameter.param)
-    })) };
-    if (name === 'read_system') {
-      const system = findSystem(args.system_id);
-      if (!system) throw new Error(self.system_id + ' 请求读取不存在的系统 ' + args.system_id + '。');
-      return { ok: true, ...cloneJson(systemState(frame, system)) };
-    }
-    if (name === 'edit_parameters') {
-      if (!Array.isArray(args.ops) || args.ops.length > 24) throw new Error('edit_parameters.ops 必须是最多24项的数组。');
-      const known = new Set(self.parameters.map(parameter => parameter.param));
-      const changed = new Set();
-      for (const operation of args.ops) {
-        if (!['add', 'change', 'remove'].includes(operation.op) || typeof operation.name !== 'string' || !operation.name || operation.name.length > 100 || !Number.isFinite(operation.value) || Math.abs(operation.value) > 1000000) throw new Error('edit_parameters 中存在不合法操作、参数名或数值。');
-        if (changed.has(operation.name)) throw new Error(self.system_id + '.' + operation.name + ' 在同一批操作中被重复修改。');
-        changed.add(operation.name);
-        const exists = known.has(operation.name);
-        if (operation.op === 'add' && exists) throw new Error(self.system_id + '.' + operation.name + ' 已存在，不能重复添加。');
-        if (operation.op !== 'add' && !exists) throw new Error(self.system_id + '.' + operation.name + ' 不存在，不能修改或删除。');
-        if (operation.op === 'add') known.add(operation.name);
-        if (operation.op === 'remove') known.delete(operation.name);
-        commands.parameterOps.push({ op: operation.op, name: operation.name, value: operation.value });
-      }
-      return { ok: true, queued: true };
-    }
-    if (name === 'deliver_event') {
-      const target = findSystem(args.target_system_id);
-      if (!target) throw new Error('deliver_event 目标 ' + args.target_system_id + ' 不存在。');
-      if (typeof args.event_description !== 'string' || !args.event_description.trim() || args.event_description.length > 1200 || !Array.isArray(args.delta_parameters) || args.delta_parameters.length > 24) throw new Error('deliver_event 描述或参数格式不合法。');
-      const delta = args.delta_parameters.map(parameter => {
-        if (typeof parameter.name !== 'string' || !parameter.name || parameter.name.length > 100 || !Number.isFinite(parameter.value) || Math.abs(parameter.value) > 1000000) throw new Error('事件参数名不能为空且数值必须有限。');
-        if (!target.parameters.some(current => current.param === parameter.name)) throw new Error('目标系统 ' + target.system_id + ' 没有参数 ' + parameter.name + '。');
-        return { param: parameter.name, value: parameter.value };
-      });
-      commands.events.push({ target_system_id: target.system_id, event_description: args.event_description.trim(), delta_parameters: delta });
-      return { ok: true, queued: true };
-    }
-    if (name === 'consume_events') { commands.consumeEvents = true; return { ok: true, queued: true }; }
-    if (name === 'set_statement') {
-      if (typeof args.statement !== 'string' || !args.statement.trim() || args.statement.length > 400) throw new Error('set_statement需要1至400字的状态说明。');
-      commands.statement = args.statement.trim();
-      return { ok: true, queued: true };
-    }
-    if (name === 'math_eval') return { ok: true, value: evaluateMath(args.expression, args.variables) };
-    throw new Error(self.system_id + ' 调用了不支持的工具 ' + name + '。');
-  }
-
-  function evaluateMath(expression, variables) {
-    if (typeof expression !== 'string' || expression.length > 240 || !Array.isArray(variables)) throw new Error('math_eval输入格式不合法。');
-    const values = new Map(variables.map(item => {
-      if (typeof item.name !== 'string' || !item.name || !Number.isFinite(item.value)) throw new Error('math_eval变量名或数值不合法。');
-      return [item.name, item.value];
-    }));
-    const tokens = [];
-    const pattern = /\s*(?:(\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)|([A-Za-z_][A-Za-z0-9_]*)|(\*\*|[()+\-*/^]))/gy;
-    let index = 0;
-    while (index < expression.length) {
-      pattern.lastIndex = index;
-      const match = pattern.exec(expression);
-      if (!match || match.index !== index) throw new Error('math_eval只支持数字、变量、括号和 + - * / ^ 或 **。');
-      tokens.push(match[1] || match[2] || match[3]);
-      index = pattern.lastIndex;
-    }
-    let cursor = 0;
-    const peek = () => tokens[cursor];
-    const take = () => tokens[cursor++];
-    function primary() {
-      const token = take();
-      if (token === '(') { const value = sum(); if (take() !== ')') throw new Error('math_eval括号不匹配。'); return value; }
-      if (token === undefined) throw new Error('math_eval表达式不完整。');
-      if (/^(?:\d|\.)/.test(token)) return Number(token);
-      if (/^[A-Za-z_]/.test(token)) {
-        if (!values.has(token)) throw new Error('math_eval缺少变量 ' + token + '。');
-        return values.get(token);
-      }
-      throw new Error('math_eval表达式不完整。');
-    }
-    function power() { const left = primary(); if (peek() === '^' || peek() === '**') { take(); return left ** unary(); } return left; }
-    function unary() { if (peek() === '+') { take(); return unary(); } if (peek() === '-') { take(); return -unary(); } return power(); }
-    function product() {
-      let value = unary();
-      while (peek() === '*' || peek() === '/') {
-        const op = take(), right = unary();
-        if (op === '/' && right === 0) throw new Error('math_eval不能除以0。');
-        value = op === '*' ? value * right : value / right;
-      }
-      return value;
-    }
-    function sum() {
-      let value = product();
-      while (peek() === '+' || peek() === '-') {
-        const op = take(), right = product();
-        value = op === '+' ? value + right : value - right;
-      }
-      return value;
-    }
-    const result = sum();
-    if (cursor !== tokens.length || !Number.isFinite(result)) throw new Error('math_eval表达式多余或结果不是有限数值。');
-    return result;
-  }
-
-  function applyCommands(frame, result) {
-    const self = frame.systems.find(system => system.system_id === result.systemId);
-    for (const operation of result.commands.parameterOps) {
-      const index = self.parameters.findIndex(parameter => parameter.param === operation.name);
-      if (operation.op === 'add') self.parameters.push({ param: operation.name, value: operation.value });
-      else if (operation.op === 'change') self.parameters[index].value = operation.value;
-      else self.parameters.splice(index, 1);
-    }
-    if (result.commands.statement !== null) self.statement = result.commands.statement;
-    if (result.commands.consumeEvents) self.events = [];
-    for (const event of result.commands.events) {
-      frame.systems.find(system => system.system_id === event.target_system_id).events.push({
-        event_description: event.event_description,
-        delta_parameters: event.delta_parameters.map(parameter => ({ ...parameter }))
-      });
-    }
-  }
-
-  function validateBodyState(frame) {
-    validateBodyFramework(frame);
-    for (const system of frame.systems) {
-      if (!Number.isFinite(system.time_clock) || system.time_clock < 0 || typeof system.statement !== 'string') throw new Error(system.system_id + ' 的时钟或文字状态不合法。');
-      for (const parameter of system.parameters) if (!Number.isFinite(parameter.value)) throw new Error(system.system_id + '.' + parameter.param + ' 不是有限数值。');
-      for (const event of system.events) {
-        if (!event.event_description || !Array.isArray(event.delta_parameters)) throw new Error(system.system_id + ' 存在格式不合法的事件。');
-        for (const parameter of event.delta_parameters) if (!Number.isFinite(parameter.value)) throw new Error(system.system_id + ' 的事件数值不是有限数值。');
-      }
-    }
+  function applyFrameworkCommand(frame, commandLog, command) {
+    R.applyLoggedCommand(frame, command);
+    commandLog.push(cloneJson(command));
   }
 
   async function processBody(settings, frame, action, context) {
-    frame.framework_param.time_delta = action.durationMin;
-    frame.framework_param.real_time_delta = 0;
+    const commandLog = [];
+    applyFrameworkCommand(frame, commandLog, {
+      type: 'set_framework_parameter', name: 'time_delta', value: action.durationMin
+    });
+
     const external = frame.systems.find(system => system.system_id === 'external');
-    external.parameters = context.parameters.map(item => ({ param: item.param, value: item.value }));
-    external.statement = context.systemText;
+    if (external) {
+      const parameters = cloneJson(external.parameters);
+      for (const item of context.parameters) {
+        const index = parameters.findIndex(parameter => parameter.param === item.param);
+        if (index < 0) parameters.push({ param: item.param, value: item.value });
+        else parameters[index].value = item.value;
+      }
+      applyFrameworkCommand(frame, commandLog, {
+        type: 'replace_parameters', system_id: external.system_id, parameters
+      });
+      applyFrameworkCommand(frame, commandLog, {
+        type: 'set_statement', system_id: external.system_id,
+        statement: context.systemText
+      });
+    }
+
     const inputEvent = {
-      event_description: '岛屿端本轮上下文（事实输入，不是已经量化的人体变化）：' + context.actionDescription + ' ' + context.systemText,
+      event_description: '岛屿端本轮上下文（环境与动作事实；不是已经量化的人体变化）：' + context.actionDescription + ' ' + context.systemText,
       delta_parameters: []
     };
-    external.events.push(cloneJson(inputEvent));
-    SYSTEM_IDS.filter(id => id !== 'external').forEach(id => frame.systems.find(system => system.system_id === id).events.push(cloneJson(inputEvent)));
+    for (const system of frame.systems) {
+      applyFrameworkCommand(frame, commandLog, {
+        type: 'append_event', system_id: system.system_id, event: inputEvent
+      });
+    }
 
-    const externalResult = await runBodySystem(settings, frame, 'external');
-    applyCommands(frame, externalResult);
-    const ids = SYSTEM_IDS.filter(id => id !== 'external');
-    const settled = await Promise.allSettled(ids.map(id => runBodySystem(settings, frame, id)));
-    const failed = settled.find(item => item.status === 'rejected');
-    if (failed) throw failed.reason;
-    const results = settled.map(item => item.value);
-    results.forEach(result => applyCommands(frame, result));
-    frame.systems.forEach(system => { system.time_clock += action.durationMin; });
-    validateBodyState(frame);
-    return [externalResult, ...results];
+    const inferenceStartedAt = performance.now();
+    const inference = await R.forwardInference(
+      frame,
+      (messages, availableTools, choice) => requestCompletion(settings, messages, availableTools, choice),
+      '网页实验约定：time_delta 与 time_clock 单位为分钟；每个系统只读取本轮开始时的状态快照。事件中的 delta_parameters 为空时只提供环境/动作事实，不代表量化的人体变化。只通过工具提交当前系统的修改；不得诊断疾病、决定死亡或把未由岛屿端提供的参数称为本岛实测。'
+    );
+    await honorRealTimeDelta(frame, inferenceStartedAt);
+    frame.framework_param = inference.frame.framework_param;
+    frame.systems = inference.frame.systems;
+    commandLog.push(...inference.commandLog.map(cloneJson));
+    R.validate(frame);
+    return { results: inference.results, commandLog };
+  }
+
+  async function honorRealTimeDelta(frame, startedAt) {
+    const minimumMs = frame.framework_param.real_time_delta * 1000;
+    let remaining = minimumMs - (performance.now() - startedAt);
+    while (remaining > 0) {
+      setSimulationStatus('系统处理完成 · 等待现实节奏 · 模拟时间暂停');
+      await new Promise(resolve => setTimeout(resolve, Math.min(remaining, 1000)));
+      remaining = minimumMs - (performance.now() - startedAt);
+    }
   }
 
   function changedParameters(oldSystem, newSystem) {
@@ -692,7 +520,7 @@
       ['action_duration_min', action.durationMin],
       ['actual_movement_m', outcome.movement ? outcome.movement.distance_m : 0]
     ].map(pair => ({ param: pair[0], value: pair[1] }));
-    const systemText = '模拟时间 ' + startDate + ' 至 ' + endDate + '；位置东 ' + outcome.endPosition[0].toFixed(1) + ' 米、北 ' + outcome.endPosition[1].toFixed(1) + ' 米；海拔插值 ' + elevation.toFixed(1) + ' 米。' + actionDescription + ' 风速与空气湿度：当前网站未提供，视为未知，不可当作0。';
+    const systemText = '模拟时间 ' + startDate + ' 至 ' + endDate + '；位置东 ' + outcome.endPosition[0].toFixed(1) + ' 米、北 ' + outcome.endPosition[1].toFixed(1) + ' 米；海拔插值 ' + elevation.toFixed(1) + ' 米。' + actionDescription + ' 岛屿端未提供风速与空气湿度；若导入框架仍含相关数值，它们仅是该框架的实验设定，不是本岛实测。';
     return { actionDescription, systemText, parameters };
   }
 
@@ -714,6 +542,7 @@
     setBusy(true);
     roundActive = true;
     roundCalls = 0;
+    roundCallsLimit = 1 + R.MAX_TOOL_ROUNDS * session.body.systems.length;
     setSimulationStatus('双方处理中 · 模拟时间暂停');
     let committed = false;
     try {
@@ -727,12 +556,14 @@
       const outcome = resolveIslandAction(islandStage, normalized, startPosition, inventoryStage);
       const context = makeEventContext(normalized, outcome, islandStage);
       const beforeBody = cloneJson(bodyStage);
-      const results = await processBody(settings, bodyStage, normalized, context);
+      const bodyResult = await processBody(settings, bodyStage, normalized, context);
+      const results = bodyResult.results;
       M.validate(islandStage);
       if (!M.inside(outcome.endPosition)) throw new Error('岛屿裁决返回了海面坐标，拒绝提交。');
       G.IslandApp.setWorldState(islandStage, outcome.endPosition);
       session.world = islandStage;
       session.body = bodyStage;
+      session.frameworkCommandLog.push(...bodyResult.commandLog.map(cloneJson));
       session.inventory = inventoryStage;
       session.position = outcome.endPosition.slice();
       session.round += 1;
@@ -743,13 +574,15 @@
       renderInventory();
       refreshOptions();
       updateSurvivorMarker(session.position, true);
+      renderFramework();
       setSimulationStatus('回合已统一提交');
       say('岛屿端', outcomeText(normalized, outcome));
       for (const result of results) {
         const after = bodyStage.systems.find(system => system.system_id === result.systemId);
         const before = beforeBody.systems.find(system => system.system_id === result.systemId);
         const changes = changedParameters(before, after);
-        say('身体端 · ' + result.systemId, changes.length ? after.statement + '\n本轮参数：' + changes.join('；') : after.statement);
+        const details = changes.length ? after.statement + '\n本轮参数：' + changes.join('；') : after.statement;
+        say('身体端 · ' + result.systemId, details + (result.finalText ? '\n模型补充：' + result.finalText : ''));
       }
       say('系统', '第 ' + session.round + ' 回合完成。岛屿状态与身体框架均已更新，模拟时间统一推进 ' + normalized.durationMin + ' 分钟。');
     } catch (error) {
@@ -778,8 +611,8 @@
     if (session && !confirm('开始新实验分支会重置当前网页里的岛屿和身体演示状态。请确认是否重新开始。')) return;
     let body;
     try {
-      if (!G.SITPBodyFramework) throw new Error('没有读取到 body-framework.js。');
-      body = cloneJson(G.SITPBodyFramework);
+      if (!R || !selectedFramework) throw new Error('没有读取到有效的推理框架。');
+      body = R.normalize(selectedFramework);
       validateBodyFramework(body);
     } catch (error) { status(error.message, 'error'); return; }
     const position = G.IslandApp.getPosition();
@@ -792,7 +625,10 @@
     el('modelCallCount').textContent = '0';
     el('simRound').textContent = '0';
     el('simLog').replaceChildren();
-    session = { seed, world, body, position: position.slice(), inventory: {}, round: 0, pendingAction: null };
+    session = {
+      seed, world, body, frameworkAnchor: cloneJson(body), frameworkCommandLog: [],
+      position: position.slice(), inventory: {}, round: 0, pendingAction: null
+    };
     G.IslandApp.setWorldState(world, position);
     updateSurvivorMarker(position, true);
     lockResearchControls(true);
@@ -801,6 +637,7 @@
     status('实验已初始化。模型只在发送操作时调用；失败时保留同一回合输入并允许重试。', 'ok');
     el('simClock').textContent = formatClock(world);
     renderInventory();
+    renderFramework();
     refreshOptions();
     updateActionFields();
     const weather = M.weather(world.hour, world.seed, position);
@@ -821,6 +658,179 @@
     setSimulationStatus('已结束');
     el('simClock').textContent = '';
     renderInventory();
+    renderFramework();
+  }
+
+  function setFrameworkStatus(text, kind) {
+    const node = el('frameworkStatus');
+    node.textContent = text;
+    node.dataset.kind = kind || '';
+  }
+
+  function updateFrameworkControls() {
+    const hasFrame = Boolean(session ? session.body : selectedFramework);
+    const commandCount = session ? session.frameworkCommandLog.length : 0;
+    el('frameworkFile').disabled = busy || Boolean(session);
+    el('exportFramework').disabled = !hasFrame || busy;
+    el('exportFrameworkLog').disabled = !session || busy;
+    el('frameworkReplayIndex').disabled = !session || busy || commandCount === 0;
+    el('exportReplaySnapshot').disabled = !session || busy;
+    el('frameworkEditor').disabled = busy || Boolean(session);
+    el('applyFrameworkEditor').disabled = busy || Boolean(session);
+    const locked = busy || Boolean(session && session.pendingAction);
+    el('frameworkClockEditors').querySelectorAll('input, button').forEach(control => { control.disabled = locked; });
+  }
+
+  function renderFrameworkClockEditors(frame) {
+    const box = el('frameworkClockEditors');
+    box.replaceChildren();
+    if (!frame) return;
+    for (const system of frame.systems) {
+      const row = document.createElement('div');
+      const label = document.createElement('label');
+      const name = document.createElement('span');
+      const input = document.createElement('input');
+      const button = document.createElement('button');
+      row.className = 'frameworkClockRow';
+      name.textContent = system.system_id;
+      input.type = 'number';
+      input.step = 'any';
+      input.value = String(system.time_clock);
+      input.setAttribute('aria-label', system.system_id + ' time_clock');
+      button.type = 'button';
+      button.textContent = '设定';
+      button.addEventListener('click', () => {
+        const value = input.valueAsNumber;
+        if (!Number.isFinite(value)) { setFrameworkStatus(system.system_id + ' 的 time_clock 必须是有限数值。', 'error'); return; }
+        const command = { type: 'set_time_clock', system_id: system.system_id, value };
+        const target = session ? session.body : selectedFramework;
+        try {
+          R.applyLoggedCommand(target, command);
+          if (session) session.frameworkCommandLog.push(cloneJson(command));
+          else selectedFramework = R.normalize(target);
+          renderFramework();
+          setFrameworkStatus(system.system_id + ' 的 time_clock 已设为 ' + value + '；该字段不会自动推进。', 'ok');
+        } catch (error) {
+          setFrameworkStatus('未能设定 time_clock：' + (error.message || String(error)), 'error');
+        }
+      });
+      label.append(name, input);
+      row.append(label, button);
+      box.append(row);
+    }
+  }
+
+  function renderFrameworkReplay() {
+    if (!session) {
+      el('frameworkReplayCount').textContent = '0 / 0';
+      el('frameworkReplay').textContent = '开始实验后可按命令序号回放。';
+      updateFrameworkControls();
+      return;
+    }
+    const commands = session.frameworkCommandLog;
+    const index = Math.max(0, Math.min(commands.length, Number(el('frameworkReplayIndex').value) || 0));
+    try {
+      const frame = R.replay(session.frameworkAnchor, commands, index);
+      el('frameworkReplayCount').textContent = index + ' / ' + commands.length;
+      el('frameworkReplay').textContent = JSON.stringify(frame, null, 2);
+    } catch (error) {
+      el('frameworkReplayCount').textContent = index + ' / ' + commands.length;
+      el('frameworkReplay').textContent = '回放失败：' + (error.message || String(error));
+    }
+    updateFrameworkControls();
+  }
+
+  function renderFramework() {
+    const frame = session ? session.body : selectedFramework;
+    const source = session ? '本次实验' : selectedFrameworkFile;
+    if (!frame) {
+      el('frameworkSummary').textContent = '未加载';
+      el('frameworkState').textContent = '没有有效框架。';
+      renderFrameworkReplay();
+      return;
+    }
+    el('frameworkSummary').textContent = frame.name + ' · ' + frame.systems.length + ' 个系统';
+    el('frameworkState').textContent = JSON.stringify(frame, null, 2);
+    el('frameworkEditor').value = JSON.stringify(frame, null, 2);
+    renderFrameworkClockEditors(frame);
+    const commands = session ? session.frameworkCommandLog : [];
+    el('frameworkReplayIndex').max = String(commands.length);
+    el('frameworkReplayIndex').value = String(commands.length);
+    setFrameworkStatus(
+      source + '：' + frame.systems.length + ' 个系统；仿真步长 ' + frame.framework_param.time_delta + '，现实等待参数 ' + frame.framework_param.real_time_delta + '。' +
+      (session ? ' 已提交 ' + session.round + ' 个回合、记录 ' + commands.length + ' 条状态命令。' : ' 开始实验后每个系统将并行读取同一份回合起始状态。'),
+      'ok'
+    );
+    renderFrameworkReplay();
+  }
+
+  function safeFilename(value) {
+    return String(value || 'framework').replace(/[\\/:*?"<>|]+/g, '-').trim().slice(0, 80) || 'framework';
+  }
+
+  function downloadJson(filename, value) {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function loadFrameworkFile(event) {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+    if (session || busy) { setFrameworkStatus('请先结束当前实验，再更换推理框架。', 'error'); return; }
+    if (file.size > 2 * 1024 * 1024) { setFrameworkStatus('框架文件超过2MB，请检查文件。', 'error'); return; }
+    try {
+      const parsed = JSON.parse(await file.text());
+      const frame = R.normalize(parsed);
+      selectedFramework = frame;
+      selectedFrameworkFile = file.name;
+      renderFramework();
+      setFrameworkStatus('已载入 ' + file.name + '：' + frame.systems.length + ' 个系统。rule 将作为模型系统提示发送。', 'ok');
+    } catch (error) {
+      setFrameworkStatus('框架未载入：' + (error.message || String(error)), 'error');
+    }
+  }
+
+  function applyFrameworkEditor() {
+    if (session || busy) { setFrameworkStatus('请先结束当前实验，再编辑推理框架。', 'error'); return; }
+    try {
+      const frame = R.normalize(JSON.parse(el('frameworkEditor').value));
+      selectedFramework = frame;
+      selectedFrameworkFile = '网页 JSON 编辑器';
+      renderFramework();
+      setFrameworkStatus('网页编辑的框架已应用：' + frame.systems.length + ' 个系统。', 'ok');
+    } catch (error) {
+      setFrameworkStatus('框架未应用：' + (error.message || String(error)), 'error');
+    }
+  }
+
+  function exportFrameworkSnapshot() {
+    const frame = session ? session.body : selectedFramework;
+    if (!frame) return;
+    downloadJson(safeFilename(frame.name) + '-snapshot.json', R.normalize(frame));
+  }
+
+  function exportFrameworkLog() {
+    if (!session) return;
+    downloadJson(safeFilename(session.body.name) + '-commands.json', {
+      format: 'SITP-framework-command-log',
+      version: 1,
+      completed_rounds: session.round,
+      initial_snapshot: session.frameworkAnchor,
+      commands: session.frameworkCommandLog,
+      current_snapshot: session.body
+    });
+  }
+
+  function exportReplaySnapshot() {
+    if (!session) return;
+    const index = Number(el('frameworkReplayIndex').value) || 0;
+    const frame = R.replay(session.frameworkAnchor, session.frameworkCommandLog, index);
+    downloadJson(safeFilename(frame.name) + '-replay-' + index + '.json', frame);
   }
 
   function randomSeed() {
@@ -843,6 +853,12 @@
   }
 
   el('discoverModels').addEventListener('click', discoverModels);
+  el('frameworkFile').addEventListener('change', loadFrameworkFile);
+  el('applyFrameworkEditor').addEventListener('click', applyFrameworkEditor);
+  el('exportFramework').addEventListener('click', exportFrameworkSnapshot);
+  el('exportFrameworkLog').addEventListener('click', exportFrameworkLog);
+  el('frameworkReplayIndex').addEventListener('input', renderFrameworkReplay);
+  el('exportReplaySnapshot').addEventListener('click', exportReplaySnapshot);
   el('aiApiKey').addEventListener('input', saveRememberedKey);
   el('aiApiKey').addEventListener('change', () => { if (el('aiApiKey').value.trim()) discoverModels(); });
   el('aiEndpoint').addEventListener('change', () => { if (el('aiApiKey').value.trim()) discoverModels(); });
@@ -859,6 +875,13 @@
     catch (error) { status(error.message, 'error'); say('输入错误', error.message); }
   });
   el('retryAction').addEventListener('click', () => { if (session && session.pendingAction && !busy) performRound(cloneJson(session.pendingAction)); });
+  try {
+    selectedFramework = R.normalize(G.SITPBodyFramework);
+  } catch (error) {
+    selectedFramework = null;
+    setFrameworkStatus('内置框架不可用：' + (error.message || String(error)), 'error');
+  }
+  renderFramework();
   loadRememberedKey();
   if (el('aiApiKey').value.trim()) discoverModels();
   updateActionFields();
