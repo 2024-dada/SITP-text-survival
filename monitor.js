@@ -154,9 +154,6 @@
       statement.append(element('p', 'monitorStatementText', system.statement));
       card.append(statement);
     }
-    if (result) {
-      card.append(fieldRow('最近工具调用', 'toolTrace.length', result.toolCount + (result.toolNames.length ? ' · ' + result.toolNames.join('、') : '')));
-    }
     return card;
   }
 
@@ -181,32 +178,9 @@
       root.append(element('article', 'monitorCard monitorEmptyCard', '载入 Agent JSON 后会在这里按 system_id 分组显示参数。'));
     }
 
-    const run = snapshot.run;
-    const runtimeRows = [
-      ['当前状态', 'lastAgentRoundState', run.state],
-      ['已提交回合', 'interactionSession.round', run.round],
-      ['本轮模型请求', 'roundCalls', run.roundCalls],
-      ['累计模型请求', 'modelCalls', run.modelCalls],
-      ['工具循环上限', 'MAX_TOOL_ROUNDS', run.maxToolRounds],
-      ['框架系统数上限', 'MAX_SYSTEMS', run.maxSystems],
-      ['模拟步长参数', 'framework_param.time_delta', run.timeDelta],
-      ['现实等待参数', 'framework_param.real_time_delta', run.realTimeDelta],
-      ['状态修改记录', 'frameworkCommandLog.length', run.commandCount]
-    ];
-    const runtimeExtra = run.error ? element('p', 'monitorRunError', run.error) : null;
-    root.append(platformCard('推理运行时', 'framework-runtime.js / survival-agent.js', runtimeRows, runtimeExtra));
-
-    const model = snapshot.model;
-    const modelRows = [
-      ['Base URL 主机', 'aiBaseUrl.value', model.provider],
-      ['API Key', 'aiApiKey.value', model.apiKeyConfigured ? '已填写 · 不显示密钥' : '未填写'],
-      ['记住 Key', 'rememberApiKey.checked', model.rememberKey ? '已开启 · 保存在此浏览器' : '关闭 · 仅当前页面'],
-      ['对话模型', 'aiModelName.value', model.modelName],
-      ['可选模型数', 'aiModelChoices.options', model.modelCount],
-      ['API 余额', 'apiBalance.textContent', model.balance],
-      ['连接状态', 'providerStatus.textContent', model.providerStatus]
-    ];
-    root.append(platformCard('模型连接与调度', 'Base URL / requestCompletion', modelRows));
+    root.append(platformCard('全局实验参数', 'framework_param', [
+      ['仿真步长（分钟）', 'framework_param.time_delta', snapshot.run.timeDelta]
+    ]));
     updated.textContent = '实时更新 · ' + new Date().toLocaleTimeString();
   }
 
