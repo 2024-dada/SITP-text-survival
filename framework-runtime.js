@@ -67,7 +67,7 @@
     makeTool('consume_events', '清空当前系统已经处理的事件；必须说明清理原因。', {
       reason: { type: 'string' }
     }, ['reason']),
-    makeTool('send_message', '向一个或多个系统发送公开文本消息。所有系统下一轮都能看到完整对话；收件对象表示希望谁回应。此工具不会修改收件系统的参数。', {
+    makeTool('send_message', '向一个或多个系统定向发送公开文本消息。收件对象表示希望谁回应，但不会停用其他系统；所有系统每轮都会参与并在下一轮看到完整对话。此工具不会修改收件系统的参数。', {
       target_system_ids: { type: 'array', items: { type: 'string' } },
       message: { type: 'string' }
     }, ['target_system_ids', 'message'])

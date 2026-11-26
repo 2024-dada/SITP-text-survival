@@ -1,15 +1,19 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SITP · Agent 交互实验</title><link rel="stylesheet" href="style.css?v=4.2.2"><script defer src="data.js?v=3.3.2"></script><script defer src="model.js?v=4.0.0"></script><script defer src="observation.js?v=3.3.2"></script><script defer src="app.js?v=4.0.0"></script><script defer src="body-framework.js?v=4.0.0"></script><script defer src="framework-runtime.js?v=4.2.2"></script><script defer src="survival-agent.js?v=4.2.2"></script></head><body>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SITP · Agent 交互实验</title><link rel="stylesheet" href="style.css?v=4.2.3"><script defer src="data.js?v=3.3.2"></script><script defer src="model.js?v=4.0.0"></script><script defer src="observation.js?v=3.3.2"></script><script defer src="app.js?v=4.0.0"></script><script defer src="body-framework.js?v=4.0.0"></script><script defer src="framework-runtime.js?v=4.2.3"></script><script defer src="survival-agent.js?v=4.2.3"></script></head><body>
 <header><a class="brand" href="./"><span>◈</span><div>OLORUA<small>SITP · 文本生存 / 岛屿建模</small></div></a><div class="headRight"><span class="badge">Agent 逐轮交互</span><button id="help">使用说明</button><a href="https://github.com/2024-dada/SITP-text-survival" target="_blank" rel="noopener">GitHub ↗</a></div></header>
 <main><section class="intro"><div><div class="eyebrow">OLORUA AGENT WORKBENCH / 对话实验</div><h1>让求生者与岛屿 agent 对话。</h1><p>手动逐轮运行 · 同轮并行 · 状态变更附理由 · A/B/C 参数参考 Agent</p></div><div class="introNote">网站已附带本次提供的 A/B/C 参数参考框架并自动载入。模拟设定、缺失项和待组长确认状态照原样保留，不代表本岛实测；可在侧栏换载其他 Olorua JSON。</div></section>
 <div class="agentWorkbench">
 <section class="panel agentChatPanel" aria-labelledby="agentChatHeading">
   <div class="agentChatHead">
-    <div><h2 id="agentChatHeading">Agent 文本交互</h2><p>各 agent 并行读取同一份起始状态和上一轮完整对话；收件对象表示希望谁回应。</p></div>
+    <div><h2 id="agentChatHeading">Agent 文本交互</h2><p>所有已载入 agent 每轮并行参与，并读取上一轮完整对话。</p></div>
     <div class="agentChatMeta"><span id="agentInteractionStatus" class="agentInteractionStatus" role="status">载入 A/B/C 参考 Agent 中</span><span>已提交 <b id="agentRoundCount">0</b> 轮</span></div>
   </div>
   <label class="agentPromptLabel" for="agentRoundPrompt">本轮任务或问题（可留空）</label>
   <textarea id="agentRoundPrompt" rows="3" placeholder="可选：写一句本轮希望 agent 讨论的问题；留空时按各自 rule 和状态交互。"></textarea>
-  <label class="agentRecipientsLabel" for="agentRecipients"><span>希望哪些 Agent 回应</span><select id="agentRecipients" multiple size="4" aria-describedby="agentRecipientsHelp"><option value="" disabled>载入 JSON 后选择回应对象</option></select><small id="agentRecipientsHelp">默认选中全部。可多选；消息对所有 Agent 可见，选中对象表示希望谁回应。</small></label>
+  <div class="agentRoster" role="group" aria-labelledby="agentRosterHeading">
+    <div class="agentRosterHead"><span id="agentRosterHeading">每轮参与的 Agent</span><strong id="agentRosterCount">等待载入 JSON</strong></div>
+    <div id="agentRosterList" class="agentRosterList" aria-live="polite"></div>
+    <small>所有已载入 Agent 都会强制参与每一轮；研究者的问题发送给全体。</small>
+  </div>
   <div class="agentChatActions"><button id="runAgentRound" type="button" class="primaryAction" disabled>运行第一轮</button><button id="retryAgentRound" type="button" hidden>重试未提交轮次</button><button id="endAgentInteraction" type="button" disabled>结束并重置会话</button><span id="agentModelCallCount">模型请求 0</span></div>
   <details id="agentFailurePanel" class="agentFailurePanel" hidden><summary>查看本轮失败原因</summary><pre id="agentFailureText"></pre></details>
   <div id="agentTranscript" class="agentTranscript" aria-live="polite"><p class="emptyLog">网站默认载入 A/B/C 参数参考 Agent。先展开右侧“参数观测”配置模型服务；也可换载其他 Olorua JSON。首次点击“运行第一轮”会接入一个无预置参数的求生者 agent。</p></div>
@@ -87,5 +91,5 @@
 </details>
 </div>
 <footer><span>数据参考：OSM岸线 · FMS Lakeba温雨 · GLO90高程采样</span><span>静态页面 · 生存实验通过浏览器直连模型API · 身体示例不代表临床数据 / 观测算法 obs-dir-v4</span></footer></main>
-<dialog id="guide"><h2>Agent 文本交互</h2><p>网站默认附带并自动载入 A/B/C 参数参考框架；展开右侧“参数观测与岛屿视图”配置模型服务，也可换载其他 Olorua JSON systems。框架中的模拟设定和待确认项不代表本岛实测，也不会把内置身体示例当成岛屿数据。JSON 中每个 system 成为一个岛屿 agent；网站另接入一个无预置参数的求生者 agent。</p><p>每次由你点“运行一轮”。同一轮所有 agent 并行读取相同起始状态和上一轮完整对话；本轮结束后，下一轮才互相看到本轮发言。可选填一句任务；收件对象表示希望谁回应，消息对所有 agent 可见。只要一个 agent 失败，本轮状态就不提交，可重试同一轮。</p><p>agent 可以读取其他系统，但只能修改自己的参数、说明、事件队列和 time_clock 标注；每项状态变化都要求说明理由，并在聊天记录里显示修改前后。time_clock 标注不会推进岛屿模拟时钟。工具调用和错误收在可展开详情里。</p><p>右侧观测栏包含旧地图、天气、资源和水量演示信息，当前为只读。这里的地图与模拟参数不是待载入的岛屿组 JSON，也不能当成 Olorua 实测值。</p><button id="closeHelp">知道了</button></dialog>
+<dialog id="guide"><h2>Agent 文本交互</h2><p>网站默认附带并自动载入 A/B/C 参数参考框架；展开右侧“参数观测与岛屿视图”配置模型服务，也可换载其他 Olorua JSON systems。框架中的模拟设定和待确认项不代表本岛实测，也不会把内置身体示例当成岛屿数据。JSON 中每个 system 成为一个岛屿 agent；网站另接入一个无预置参数的求生者 agent。</p><p>每次由你点“运行一轮”。同一轮所有 agent 并行读取相同起始状态和上一轮完整对话；本轮结束后，下一轮才互相看到本轮发言。可选填一句任务，任务发送给全体；所有已载入 agent 每轮都会参与，不能单独关闭。只要一个 agent 失败，本轮状态就不提交，可重试同一轮。</p><p>agent 可以读取其他系统，但只能修改自己的参数、说明、事件队列和 time_clock 标注；每项状态变化都要求说明理由，并在聊天记录里显示修改前后。time_clock 标注不会推进岛屿模拟时钟。工具调用和错误收在可展开详情里。</p><p>右侧观测栏包含旧地图、天气、资源和水量演示信息，当前为只读。这里的地图与模拟参数不是待载入的岛屿组 JSON，也不能当成 Olorua 实测值。</p><button id="closeHelp">知道了</button></dialog>
 <dialog id="textPreview" class="textPreview" aria-labelledby="textPreviewHeading"><div class="previewShell"><div class="previewTop"><div><h2 id="textPreviewHeading">文字放大预览</h2><span id="textPreviewZoom" aria-live="polite">100%</span></div><button id="closeTextPreview" type="button">关闭</button></div><div id="textPreviewStage" class="previewStage"><div id="textPreviewBody" class="previewBody"></div></div><p class="previewHint">滚轮以预览卡片中心缩放 · 点击卡片外关闭 · 内容取打开时刻</p></div></dialog></body></html>
