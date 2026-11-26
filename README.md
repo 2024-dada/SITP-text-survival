@@ -69,4 +69,4 @@ node tools/observation-check.js
 
 2026-11-26 更新：工具循环和每轮总请求次数不设固定上限；模型返回最终文本后结束，API 错误仍整轮不提交。v4.4 让用户填写 API Key、Base URL 和模型名，不限制 Key 前缀，不依据 Key 猜服务商或地址；OpenAI 兼容服务使用 Bearer 认证与 `/chat/completions`，并避免重复拼接路径。可通过 `/models` 读取列表，失败时可手动填模型。错误信息区分认证/权限、额度、模型名、接口地址和网络/CORS。DeepSeek 官方地址可查询余额。底部监控台按真实加载的 Agent 分块显示中文参数名、代码参数名和值，同时展示运行时和模型连接状态；监控不显示 Key。尚未用真实 Key 或服务端点验证。
 
-服务商预设（本地完成、未发布）：自动识别 ModelGo（mgk_）、OpenRouter（sk-or-v1-）和 Groq（gsk_）；OpenAI 与 DeepSeek 的通用 Key 由用户选择服务商后自动填入官方地址。切换 Key、预设或地址会清掉旧模型，旧查询结果不会覆盖新配置。自定义地址与服务商选择在自愿记住 Key 时一并保存。同济大学平台提供选择入口和官方文档链接；Base URL 尚未从可访问的官方文档核实，需要使用者确认后填写，未做真实联调。
+服务商预设（本地完成、未发布）：自动识别 ModelGo（mgk_）、OpenRouter（sk-or-v1-）和 Groq（gsk_）；OpenAI 与 DeepSeek 的通用 Key 由用户选择服务商后自动填入官方地址。切换 Key、预设或地址会清掉旧模型，旧查询结果不会覆盖新配置。自定义地址与服务商选择在自愿记住 Key 时一并保存。同济大学 AGI 选择后自动配置 https://agi.tongji.edu.cn/v1；依据用户提供的官方文档截图使用 Bearer 与 Chat Completions。普通 sk- 不自动判为同济；模型列表失败可手填官方 Model ID，未做真实联调。

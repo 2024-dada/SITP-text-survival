@@ -31,7 +31,7 @@
   <details class="aiSettings"><summary>模型连接设置</summary>
     <div class="aiSettingsGrid">
       <label>API Key <input id="aiApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴服务商提供的 Key（不限制前缀）"></label>
-      <label>服务商 <select id="aiProvider"><option value="auto">自动识别 Key</option><option value="modelgo">ModelGo</option><option value="openrouter">OpenRouter</option><option value="groq">Groq</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="tongji">同济大学平台（需确认地址）</option><option value="custom">自定义兼容服务</option></select></label>
+      <label>服务商 <select id="aiProvider"><option value="auto">自动识别 Key</option><option value="modelgo">ModelGo</option><option value="openrouter">OpenRouter</option><option value="groq">Groq</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="tongji">同济大学 AGI</option><option value="custom">自定义兼容服务</option></select></label>
       <label>高级连接 · Base URL <input id="aiBaseUrl" type="text" autocomplete="url" spellcheck="false" placeholder="已识别服务商自动配置；也可填写官方地址"></label>
       <label>对话模型 <input id="aiModelName" type="text" value="" autocomplete="off" spellcheck="false" placeholder="填写服务商提供的模型名称"></label>
       <p id="providerStatus" role="status">ModelGo、OpenRouter、Groq 支持特征识别；通用 Key 请选择服务商。<a href="https://agi.tongji.edu.cn/docs/overview" target="_blank" rel="noopener">同济官方使用文档 ↗</a></p>
@@ -41,7 +41,7 @@
       <label class="modelChoiceLabel">已发现模型 <select id="aiModelChoices"><option value="">可手动输入模型名</option></select></label>
     </div>
     <p class="aiPrivacy">默认只在当前页面内存使用。勾选“记住Key”会把 Key、Base URL 与模型名保存在此浏览器的本机存储中；调用时 Key 会发送到你填写的 Base URL 所属服务。只填写可信服务商的官方地址；同域网页脚本可能读取本机存储，共享电脑不要勾选。Key 不会写入存档或 GitHub。</p>
-    <p id="aiStatus" class="aiStatus" role="status">支持 ModelGo、OpenRouter、Groq 特征 Key 自动连接；OpenAI、DeepSeek 可选择服务商免填地址。同济需先在官方文档确认 Base URL。模型须支持 Chat Completions 与工具调用；列表失败可手填模型。</p>
+    <p id="aiStatus" class="aiStatus" role="status">支持 ModelGo、OpenRouter、Groq 特征 Key 自动连接；OpenAI、DeepSeek 可选择服务商免填地址。同济大学 AGI 可选择服务商免填地址；校外访问可能需要校园 VPN。模型须支持 Chat Completions 与工具调用；列表失败可手填模型。</p>
   </details>
   <details class="frameworkPanel">
     <summary>岛屿组 Agent JSON 与状态 <span id="frameworkSummary">未载入 JSON</span></summary>

@@ -318,7 +318,8 @@
     openrouter: { name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', pattern: /^sk-or-v1-\S+$/ },
     groq: { name: 'Groq', url: 'https://api.groq.com/openai/v1', pattern: /^gsk_\S+$/ },
     openai: { name: 'OpenAI', url: 'https://api.openai.com/v1' },
-    deepseek: { name: 'DeepSeek', url: 'https://api.deepseek.com' }
+    deepseek: { name: 'DeepSeek', url: 'https://api.deepseek.com' },
+    tongji: { name: '同济大学 AGI', url: 'https://agi.tongji.edu.cn/v1' }
   };
   let modelDiscoveryTimer;
   function detectedProvider(key) { return Object.values(providerPresets).find(provider => provider.pattern && provider.pattern.test(key)); }
@@ -355,7 +356,7 @@
     }
     if (!baseUrl) {
       el('providerStatus').textContent = el('aiProvider').value === 'tongji'
-        ? '同济平台：请从官方使用文档确认并填写 Base URL；公开资料尚不足以核实接口路径。'
+        ? '请选择同济大学 AGI 以自动配置官方接口地址。'
         : 'Key 前缀无法唯一识别服务商；请选择服务商，或填写官方 Base URL。';
       emitMonitorUpdate();
       return null;

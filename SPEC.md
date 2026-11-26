@@ -104,4 +104,4 @@ GitHub Pages 从仓库 `main` 根目录发布，地址固定为 `https://2024-da
 
 2026-11-26 v4.4 更新：增加任意非空 Key、手动 Base URL 与模型名、OpenAI 兼容路径规范化和错误分类；尚未完成真实服务商 API 验收。
 
-服务商预设（本地完成、未发布）：自动模式仅对 mgk_、sk-or-v1-、gsk_ 分别配置 ModelGo、OpenRouter、Groq 单一官方地址；普通 sk- 不猜服务商。显式选择 OpenAI/DeepSeek/其他预设即填入对应地址并防抖获取模型；自定义地址可手改。所有输入变更清除旧模型并使在途查询失效。预设选择随记住 Key 选项保存。官方地址依据：https://console.groq.com/docs/openai 、https://openrouter.ai/docs/quickstart 、https://developers.openai.com/api/reference/overview 、https://api-docs.deepseek.com/ 。同济预设不硬编码未经核实的 API 路径；用户从 https://agi.tongji.edu.cn/docs/overview 确认地址后按兼容接口调用，尚未验证校园网络、CORS、模型协议或真实 Key。
+服务商预设（本地完成、未发布）：自动模式仅对 mgk_、sk-or-v1-、gsk_ 分别配置 ModelGo、OpenRouter、Groq 单一官方地址；普通 sk- 不猜服务商。显式选择 OpenAI/DeepSeek/其他预设即填入对应地址并防抖获取模型；自定义地址可手改。所有输入变更清除旧模型并使在途查询失效。预设选择随记住 Key 选项保存。官方地址依据：https://console.groq.com/docs/openai 、https://openrouter.ai/docs/quickstart 、https://developers.openai.com/api/reference/overview 、https://api-docs.deepseek.com/ 。同济预设依据用户提供的官方文档截图配置 https://agi.tongji.edu.cn/v1，Bearer 认证与 /chat/completions。截图确认 tools/tool_choice 支持取决于模型；403 可能涉及校园网/VPN或授权。尚未验证校园网络、CORS或真实 Key，模型列表失败时可手填 Model ID。
