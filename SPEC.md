@@ -1,14 +1,20 @@
-# 岛屿观测台与 Agent 交互实验 v4.3
+# 岛屿观测台与 Agent 交互实验 v4.6
 
 ## 当前状态（2026-11-26）
 
-ModelGo 自动连接（本地完成、未发布）：`mgk_`（含 `mgk_live_`）Key 去首尾空格后自动配置 `https://api.modelgo.ai/v1`，输入防抖 900ms 获取 `/models`，默认选首个模型；其他 Key 保留手动地址/模型配置。用户可修改高级地址；地址修改取消待发自动请求，输入变更使旧模型结果失效。只使用官方单一域名，不探测其他服务商。官方依据：https://modelgo.ai/docs/quickstart/openapi 。部分模型未开放 Chat Completions，模型可列出不等于工具回合可用。余额仍仅支持 DeepSeek；未使用真实 Key 验证 ModelGo。
+ModelGo 自动连接：`mgk_`（含 `mgk_live_`）Key 去首尾空格后自动配置 `https://api.modelgo.ai/v1`，输入防抖 900ms 获取 `/models`，默认选首个模型；其他 Key 保留手动地址/模型配置。用户可修改高级地址；地址修改取消待发自动请求，输入变更使旧模型结果失效。只使用官方单一域名，不探测其他服务商。官方依据：https://modelgo.ai/docs/quickstart/openapi 。部分模型未开放 Chat Completions，模型可列出不等于工具回合可用。余额仍仅支持 DeepSeek；未使用真实 Key 验证 ModelGo。
 
-## 外观设置（v4.5，本地实现）
+## 外观设置（v4.5）
 
 页顶“◐ 外观”使用原生对话框展示三套主题缩略卡：深潮（海蓝/薄荷青）、雾林（林绿/苔金）、暮岸（岩紫/暖杏）。选中状态通过边框与 `aria-pressed` 表达；默认为低眩光夜间深潮。支持柔和日间模式、14—20px 阅读字号、0—100% 背景强度及动画开关；所有设置即时预览，只以 `olorua.appearance.v1` 保存外观数据，刷新前恢复主题以减少闪白。存储不可用时保留当前页操作并提示。原生 dialog 支持 Escape 关闭、焦点约束和关闭后返回入口；窄屏单列选项，系统减少动画偏好优先于开关。
 
-实现位于 `appearance.css` / `appearance.js`，通过追加样式覆盖旧浅色卡片与正文，不改动 API、框架、回合或模型调用。仅完成 JavaScript 语法和差异空白检查；尚未进行浏览器人工交互验收，也未发布。
+实现位于 `appearance.css` / `appearance.js`，通过追加样式覆盖旧浅色卡片与正文，不改动 API、框架、回合或模型调用。
+
+## 服务商选择与同济 AGI（v4.6）
+
+ModelGo、OpenRouter、Groq 可按已支持的 Key 特征自动连接；OpenAI、DeepSeek 由用户选择服务商。同济大学 AGI 是独立复选框，选中后使用官方地址 `https://agi.tongji.edu.cn/v1`。勾选“记住Key”时，平台选择与 Key、Base URL、模型名一起保存在本机浏览器；页面刷新后恢复同济复选状态。用户手动选择其他服务商或编辑 Base URL 时，同济复选框自动取消；若“记住Key”仍开启，新平台也会一起保存。取消“记住Key”会删除本机保存的连接设置。
+
+同济地址依据用户提供的官方文档截图：Bearer 认证、Chat Completions 路径。未自动把通用 `sk-` Key 识别为同济。模型列表读取失败时可以手填平台 Model ID。截图提示校外访问可能需校园 VPN，且 403 也可能是模型授权问题；未进行真实 Key、校园网络、CORS 或模型回合验证。
 
 v4.0 单人生存实验由 PR #1 合并到 `main`，合并提交为 `72651c8`。v4.1 通用推理框架由 PR #2 合并到 `main`，合并提交为 `66b6ed5`；GitHub Pages workflow #20 成功。刷新线上页面已确认推理框架面板和4系统内置框架可见。此次发布没有独立 AI 代码审查；尚未用真实 API Key 完整跑通回合，也未完成身体组联调。
 
@@ -104,4 +110,4 @@ GitHub Pages 从仓库 `main` 根目录发布，地址固定为 `https://2024-da
 
 2026-11-26 v4.4 更新：增加任意非空 Key、手动 Base URL 与模型名、OpenAI 兼容路径规范化和错误分类；尚未完成真实服务商 API 验收。
 
-服务商预设（本地完成、未发布）：自动模式仅对 mgk_、sk-or-v1-、gsk_ 分别配置 ModelGo、OpenRouter、Groq 单一官方地址；普通 sk- 不猜服务商。显式选择 OpenAI/DeepSeek/其他预设即填入对应地址并防抖获取模型；自定义地址可手改。所有输入变更清除旧模型并使在途查询失效。预设选择随记住 Key 选项保存。官方地址依据：https://console.groq.com/docs/openai 、https://openrouter.ai/docs/quickstart 、https://developers.openai.com/api/reference/overview 、https://api-docs.deepseek.com/ 。同济预设依据用户提供的官方文档截图配置 https://agi.tongji.edu.cn/v1，Bearer 认证与 /chat/completions。截图确认 tools/tool_choice 支持取决于模型；403 可能涉及校园网/VPN或授权。尚未验证校园网络、CORS或真实 Key，模型列表失败时可手填 Model ID。
+服务商预设：自动模式仅对 mgk_、sk-or-v1-、gsk_ 分别配置 ModelGo、OpenRouter、Groq 单一官方地址；普通 sk- 不猜服务商。显式选择 OpenAI/DeepSeek 后填入对应地址并获取模型；自定义地址可手改。所有输入变更清除旧模型并使在途查询失效。预设选择随记住 Key 选项保存。官方地址依据：https://console.groq.com/docs/openai 、https://openrouter.ai/docs/quickstart 、https://developers.openai.com/api/reference/overview 、https://api-docs.deepseek.com/ 。同济使用单独复选框，配置 https://agi.tongji.edu.cn/v1，Bearer 认证与 /chat/completions。复选状态仅随记住 Key 保存；手动换平台后自动取消。截图确认 tools/tool_choice 支持取决于模型；403 可能涉及校园网/VPN或授权。尚未验证校园网络、CORS或真实 Key，模型列表失败时可手填 Model ID。

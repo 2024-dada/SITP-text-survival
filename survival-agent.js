@@ -105,7 +105,8 @@
     try {
       const baseUrl = el('aiBaseUrl').value.trim();
       const model = el('aiModelName').value.trim();
-      localStorage.setItem(apiProviderStorageName, el('aiProvider').value);
+      const provider = el('tongjiProvider').checked ? 'tongji' : el('aiProvider').value;
+      localStorage.setItem(apiProviderStorageName, provider);
       if (baseUrl) localStorage.setItem(apiBaseUrlStorageName, baseUrl);
       else localStorage.removeItem(apiBaseUrlStorageName);
       if (model) localStorage.setItem(apiModelStorageName, model);
@@ -134,7 +135,8 @@
         el('aiBaseUrl').value = localStorage.getItem(apiBaseUrlStorageName) || '';
         el('aiModelName').value = localStorage.getItem(apiModelStorageName) || '';
         const preset = localStorage.getItem(apiProviderStorageName);
-        if ([...el('aiProvider').options].some(option => option.value === preset)) el('aiProvider').value = preset;
+        if (preset === 'tongji') el('tongjiProvider').checked = true;
+        else if ([...el('aiProvider').options].some(option => option.value === preset)) el('aiProvider').value = preset;
         el('rememberApiKey').checked = true;
       }
       localStorage.removeItem('olorua.sitp.model-api-provider');
@@ -324,7 +326,7 @@
   let modelDiscoveryTimer;
   function detectedProvider(key) { return Object.values(providerPresets).find(provider => provider.pattern && provider.pattern.test(key)); }
   function chosenProvider(key) {
-    const choice = el('aiProvider').value;
+    const choice = el('tongjiProvider').checked ? 'tongji' : el('aiProvider').value;
     return choice === 'auto' ? detectedProvider(key) : providerPresets[choice];
   }
 
@@ -355,8 +357,8 @@
       return null;
     }
     if (!baseUrl) {
-      el('providerStatus').textContent = el('aiProvider').value === 'tongji'
-        ? '请选择同济大学 AGI 以自动配置官方接口地址。'
+      el('providerStatus').textContent = el('tongjiProvider').checked
+        ? '已选择同济大学 AGI；请检查官方 Base URL。'
         : 'Key 前缀无法唯一识别服务商；请选择服务商，或填写官方 Base URL。';
       emitMonitorUpdate();
       return null;
@@ -1425,8 +1427,15 @@
   el('exportReplaySnapshot').addEventListener('click', exportReplaySnapshot);
   el('aiApiKey').addEventListener('input', () => { saveRememberedKey(); prepareAutomaticConnection(true); });
   el('aiApiKey').addEventListener('change', saveRememberedKey);
-  el('aiProvider').addEventListener('change', () => { prepareAutomaticConnection(false, true); });
-  el('aiBaseUrl').addEventListener('input', () => { el('aiProvider').value = 'custom'; el('aiModelName').value = ''; saveRememberedConnection(); updateConnectionStatus(); });
+  el('aiProvider').addEventListener('change', () => {
+    el('tongjiProvider').checked = false;
+    prepareAutomaticConnection(false, true);
+  });
+  el('tongjiProvider').addEventListener('change', () => {
+    if (el('tongjiProvider').checked) el('aiProvider').value = 'auto';
+    prepareAutomaticConnection(false, true);
+  });
+  el('aiBaseUrl').addEventListener('input', () => { el('tongjiProvider').checked = false; el('aiProvider').value = 'custom'; el('aiModelName').value = ''; saveRememberedConnection(); updateConnectionStatus(); });
   el('aiBaseUrl').addEventListener('change', updateConnectionStatus);
   el('rememberApiKey').addEventListener('change', () => { handleRememberKeyChange(); emitMonitorUpdate(); });
   el('aiModelChoices').addEventListener('change', event => {
