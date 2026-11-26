@@ -259,6 +259,36 @@
     return message;
   }
 
+  const providerEndpoints = {
+    deepseek: 'https://api.deepseek.com/chat/completions',
+    openai: 'https://api.openai.com/v1/chat/completions',
+    openrouter: 'https://openrouter.ai/api/v1/chat/completions',
+    groq: 'https://api.groq.com/openai/v1/chat/completions'
+  };
+  function resolveProvider() {
+    const key = el('aiApiKey').value.trim();
+    let provider = el('apiProvider').value;
+    if (provider === 'auto') {
+      provider = key.startsWith('sk-or-v1-') ? 'openrouter' : key.startsWith('gsk_') ? 'groq' : /^sk-(proj|svcacct)-/.test(key) ? 'openai' : '';
+      if (!provider) {
+        el('aiEndpoint').value = '';
+        el('providerStatus').textContent = key ? '此 Key 格式被多家服务共用，请选择一次服务商，无需填写地址。' : '填写 Key 后识别服务商并获取模型。';
+        return false;
+      }
+    }
+    if (provider === 'custom') {
+      el('providerStatus').textContent = '其他兼容服务：请在高级设置中填写服务地址。';
+      return Boolean(el('aiEndpoint').value.trim());
+    }
+    el('aiEndpoint').value = providerEndpoints[provider];
+    el('providerStatus').textContent = '服务商：' + provider + ' · 正在验证 Key 并读取模型';
+    return Boolean(key);
+  }
+  async function connectFromKey() {
+    if (!resolveProvider()) return;
+    await Promise.allSettled([discoverModels(), refreshBalance()]);
+  }
+
   let balanceQuery = 0;
   async function refreshBalance() {
     const query = ++balanceQuery;
@@ -301,6 +331,12 @@
         if (typeof item.id !== 'string' || !item.id) return;
         select.append(new Option(item.name ? item.name + '（' + item.id + '）' : item.id, item.id));
       });
+      if (select.options.length > 1) {
+        const preferred = [...select.options].find(option => option.value === el('aiModelName').value) || [...select.options].find(option => /deepseek-flash|gpt-4.1-mini|llama-3.3-70b/.test(option.value)) || select.options[1];
+        select.value = preferred.value;
+        el('aiModelName').value = preferred.value;
+        el('providerStatus').textContent = '已连接 · ' + (select.options.length - 1) + ' 个可选模型';
+      }
       status('读到 ' + (select.options.length - 1) + ' 个模型。列表不代表当前 Key 一定有调用权限。', 'ok');
     } catch (error) {
       select.replaceChildren(new Option('未获取到模型，可手动填写', ''));
@@ -1154,7 +1190,8 @@
   el('frameworkReplayIndex').addEventListener('input', renderFrameworkReplay);
   el('exportReplaySnapshot').addEventListener('click', exportReplaySnapshot);
   el('aiApiKey').addEventListener('input', saveRememberedKey);
-  el('aiApiKey').addEventListener('change', () => { if (el('aiApiKey').value.trim()) discoverModels(); });
+  el('aiApiKey').addEventListener('change', connectFromKey);
+  el('apiProvider').addEventListener('change', connectFromKey);
   el('aiEndpoint').addEventListener('change', () => { if (el('aiApiKey').value.trim()) discoverModels(); });
   el('rememberApiKey').addEventListener('change', handleRememberKeyChange);
   el('aiModelChoices').addEventListener('change', event => { if (event.target.value) el('aiModelName').value = event.target.value; });
@@ -1179,7 +1216,7 @@
   renderFramework();
   loadBundledAgentFramework();
   loadRememberedKey();
-  if (el('aiApiKey').value.trim()) { discoverModels(); refreshBalance(); }
+  if (el('aiApiKey').value.trim()) connectFromKey();
   updateActionFields();
   updateAgentInteractionControls();
   keepIslandObserverReadOnly();

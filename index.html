@@ -30,10 +30,11 @@
   </div>
   <details class="aiSettings"><summary>模型连接设置</summary>
     <div class="aiSettingsGrid">
-      <label>API 地址 <input id="aiEndpoint" type="url" value="https://api.deepseek.com/chat/completions" autocomplete="url"></label>
       <label>API Key <input id="aiApiKey" type="password" autocomplete="off" placeholder="粘贴自己的 API Key"></label>
+      <p id="providerStatus" role="status">填写 Key 后识别服务商并获取模型。</p>
+      <label>服务商 <select id="apiProvider"><option value="auto">自动识别</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="groq">Groq</option><option value="custom">其他兼容服务</option></select></label>
+      <details><summary>高级设置：API 地址与模型名</summary><label>API 地址 <input id="aiEndpoint" type="url" value="" autocomplete="url"></label><label>手动模型名 <input id="aiModelName" type="text" value="" autocomplete="off"></label></details>
       <label class="rememberKeyLabel"><span><input id="rememberApiKey" type="checkbox"> 记住Key</span></label>
-      <label>模型名 <input id="aiModelName" type="text" value="deepseek-flash" autocomplete="off"></label>
       <button id="discoverModels" type="button">获取可选模型</button>
       <div><button id="refreshBalance" type="button">刷新 API 余额</button><p id="apiBalance" role="status">尚未查询余额 · 支持 DeepSeek 官方 API</p></div>
       <label class="modelChoiceLabel">已发现模型 <select id="aiModelChoices"><option value="">可手动输入模型名</option></select></label>
