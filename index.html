@@ -6,7 +6,7 @@
   <div class="aiSettingsGrid connectionGrid">
     <label class="visibleApiKey">API Key <input id="aiApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴服务商提供的 Key"></label>
     <label class="providerSelectLabel">服务商 <select id="aiProvider"><option value="auto">自动识别 Key</option><option value="modelgo">ModelGo</option><option value="openrouter">OpenRouter</option><option value="groq">Groq</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="custom">自定义兼容服务</option></select></label>
-    <div class="connectionToggles"><label class="tongjiProviderLabel"><span><input id="tongjiProvider" type="checkbox"> 同济大学 AGI</span><small>勾选后使用同济官方接口；改选其他服务商会自动取消</small></label><label class="rememberKeyLabel"><span><input id="rememberApiKey" type="checkbox"> 记住Key</span></label></div>
+    <div class="connectionToggles"><label class="tongjiProviderLabel"><span><input id="tongjiProvider" type="checkbox"> 同济大学 AGI（目前不可用）</span><small>网页聊天调用因服务端跨域响应头重复而失败，等待服务端修复。</small></label><label class="rememberKeyLabel"><span><input id="rememberApiKey" type="checkbox"> 记住Key</span></label></div>
     <label class="modelChoiceLabel">选择模型（自动获取） <select id="aiModelChoices"><option value="">填写 Key 后自动读取模型</option></select></label>
     <label class="modelNameLabel">模型名称（可手动填写） <input id="aiModelName" type="text" value="" autocomplete="off" spellcheck="false" placeholder="自动填入，也可手动填写 Model ID"></label>
     <label class="baseUrlLabel">Base URL <input id="aiBaseUrl" type="text" autocomplete="url" spellcheck="false" placeholder="识别服务商后自动填入；也可填写官方地址"></label>
