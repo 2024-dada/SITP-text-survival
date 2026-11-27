@@ -245,6 +245,13 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 .observerContent .observerLayout{display:block;margin-top:10px}
 .eventWorkbench{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(340px,.92fr);gap:18px;align-items:stretch;margin:24px 0 10px}
 .eventMapPane,.eventReportPane{min-width:0}
+.eventPointControls[hidden]{display:none!important}
+.eventPointControls:not([hidden]){display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.eventPointControls>strong{margin-right:3px;color:var(--muted);font-size:.76rem;font-weight:650}
+.eventPointButton{padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface2);color:var(--ink);font-size:.76rem;line-height:1.3;font-variant-numeric:tabular-nums}
+.eventPointButton:hover,.eventPointButton[aria-pressed="true"]{border-color:var(--accent);background:color-mix(in srgb,var(--surface2),var(--accent) 14%);color:var(--accent)}
+#eventMarkers .eventMarkerFocused{filter:drop-shadow(0 0 4px #d8793d)}
+#eventMarkers .eventMarkerFocused circle:first-of-type{stroke:#fff;stroke-width:5}
 .eventMapPane>.panelHead,.eventReportPane>.panelHead{align-items:flex-start}
 .eventMapPane>.panelHead>div,.eventReportPane>.panelHead>div{display:block;min-width:0}
 .eventMapPane>.panelHead small,.eventReportPane>.panelHead small{display:block;margin-top:5px;color:var(--muted);font-size:.78em;line-height:1.5}

@@ -39,23 +39,30 @@ const send=(method,params={})=>new Promise((res,rej)=>{const i=++id;pending.set(
 const ev=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(r.exceptionDetails.text||JSON.stringify(r.exceptionDetails));return r.result.value;};
 const mockSource=`(()=>{
   const nativeFetch=window.fetch.bind(window);
-  window.__mockRequests=[];window.__mockScenario='';window.__mockSummaryFailed=false;
+  window.__mockRequests=[];window.__mockScenario='';window.__mockSummaryFailed=false;window.__mockPlanFailed=false;
   window.fetch=async(input,init={})=>{
     const raw=typeof input==='string'?input:input.url;
     const url=new URL(raw,location.href);
     if(url.hostname==='mock.invalid'){
       if(url.pathname.endsWith('/models'))return new Response(JSON.stringify({data:[]}),{status:200,headers:{'Content-Type':'application/json'}});
       const payload=JSON.parse(init.body||'{}'),system=payload.messages?.find(item=>item.role==='system')?.content||'';
-      let type='agent',content='按当前系统状态完成本轮核对。';
+      let type='agent',content='按当前系统状态完成本轮核对。',finish='stop';
       if(system.includes('本轮行动时间线模拟器')){
         type='plan';content=JSON.stringify({title:'营地观察',summary:'按研究者任务整理一个行动时段。',steps:[{time_label:'09:00',start_offset_minutes:0,duration_minutes:30,activity:'在营地观察周边',point_id:null,resource_id:null,probability_percent:100,success_result:'完成周边观察。',failure_result:'观察未完成。',assumption:'按当前营地位置和研究者任务估计。',point_reason:'从当前位置开始。'}]});
+        if(window.__mockScenario==='planFailOnce'&&!window.__mockPlanFailed){window.__mockPlanFailed=true;content='本次注入的计划格式失败';}
       }else if(system.includes('把本轮全部 Agent 推理')){
         type='summary';
-        if(window.__mockScenario==='summaryFailOnce'&&!window.__mockSummaryFailed){window.__mockSummaryFailed=true;content='本次注入的格式失败';}
+        const recovery=payload.messages.some(item=>item.role==='user'&&String(item.content).includes('上次 JSON 被截断'));
+        if(window.__mockScenario==='summaryLengthRecovered'&&recovery){type='summary-rebuild';content=JSON.stringify({human_summary:'恢复后的完整报告摘要。',body_summary:'我完成了半小时观察，身体负荷较轻。',before_scene:'开始时人在营地。',after_scene:'结束后仍在营地。',island_summary:'模拟时钟推进30分钟，资源没有变化。'});finish='length';}
+        else if(window.__mockScenario==='summaryAlwaysEmpty'&&recovery){type='summary-rebuild';content='';}
+        else if(window.__mockScenario==='summaryLengthRecovered'||window.__mockScenario==='summaryAlwaysEmpty'){content='{"human_summary":"截断';finish='length';}
+        else if(window.__mockScenario==='bodySummaryEmpty'){content=JSON.stringify({human_summary:'按本轮结果整理事件概要。',body_summary:'',before_scene:'开始时人在营地。',after_scene:'结束后仍在营地。',island_summary:'模拟时钟推进30分钟。'});}
+        else if(window.__mockScenario==='summaryFailOnce'&&!window.__mockSummaryFailed){window.__mockSummaryFailed=true;content='本次注入的格式失败';}
         else content=JSON.stringify({human_summary:'求生者在营地完成周边观察，状态按本轮时长结算。',body_summary:'我在营地观察了半小时，暂时没有额外体力消耗；这是按本轮行动时长作出的模拟感受。',before_scene:'活动开始时人在营地，周边林地安静。',after_scene:'活动结束后仍在营地，天气与周边景象基本平稳。',island_summary:'模拟时钟推进30分钟，岛屿资源没有改变。'});
-      }
+      }else if(system.includes('你负责写供研究者阅读的中文身体感受报告')&&window.__mockScenario==='bodySummaryEmpty'){type='body-summary';content='';
+      }else if(system.includes('你正在续写')&&(window.__mockScenario==='summaryLengthRecovered'||window.__mockScenario==='summaryAlwaysEmpty')){type='summary-continuation';content='';}
       window.__mockRequests.push({type,url:url.href,model:payload.model});
-      return new Response(JSON.stringify({choices:[{message:{role:'assistant',content},finish_reason:'stop'}]}),{status:200,headers:{'Content-Type':'application/json'}});
+      return new Response(JSON.stringify({choices:[{message:{role:'assistant',content},finish_reason:finish}]}),{status:200,headers:{'Content-Type':'application/json'}});
     }
     if(url.protocol==='file:'||url.hostname==='127.0.0.1')return nativeFetch(input,init);
     throw new Error('browser-check blocked a non-mock network request: '+url.host);
@@ -115,20 +122,37 @@ try{
   let first=null;for(let i=0;i<100;i++){first=await ev(`(()=>{const a=SurvivalAgent.getExperimentArchive();return {round:Number(document.getElementById('agentRoundCount').textContent),reports:document.querySelectorAll('#eventReportList .eventReportCard').length,hour:IslandApp.getWorldState().hour,points:document.getElementById('eventMarkers').childElementCount,archive:a?JSON.stringify(a.rounds[0]?.model_responses||[]):''};})()`);if(first.round===1&&first.reports===1)break;await sleep(100);}
   ok(first?.round===1&&first.reports===1&&Math.abs(first.hour-.5)<1e-9,'假模型跑完整 Agent→报告→状态结算，时钟推进30分钟');
   ok(first?.points===1,'行动点位写入地图');
+  const focus=await ev(`(()=>{const b=document.querySelector('#eventPointControls [data-event-point-index]');if(!b)return null;b.click();const v=document.getElementById('map').viewBox.baseVal;return {count:document.querySelectorAll('#eventPointControls [data-event-point-index]').length,east:Number(b.dataset.east),north:Number(b.dataset.north),x:v.x+v.width/2,y:v.y+v.height/2,zoom:document.getElementById('zoomLevel').textContent,pressed:b.getAttribute('aria-pressed')};})()`);
+  ok(focus?.count===1&&focus.pressed==='true'&&focus.zoom==='4.0×'&&Math.abs(focus.x-focus.east)<.001&&Math.abs(focus.y+focus.north)<.001,'地图点位按钮将视口定位并高亮本轮点位');
+  await ev(`document.getElementById('resetView').click()`);
   ok(first?.archive.includes('event_report_plan')&&first?.archive.includes('event_report_summary'),'完整归档包含报告模型的原始返回');
   const units=await ev(`(()=>{const a=SurvivalAgent.getExperimentArchive();const frames=[a.initial,a.current.frame,...a.rounds.flatMap(r=>[r.frame_before,r.frame_after_agent])];const codes=[...new Set(frames.flatMap(f=>f.systems.flatMap(s=>s.parameters.map(p=>p.param))))];const missing=codes.filter(code=>typeof a.parameter_units[code]!=='string'||!a.parameter_units[code].trim());return {count:codes.length,missing};})()`);
   ok(units.count>0&&units.missing.length===0,'实验框架全部参数均有单位且纳入 PDF 单位表（'+units.count+'项）');
   const secretInArchive=await ev(`JSON.stringify(SurvivalAgent.getExperimentArchive()).includes('browser-check-only-secret')`);
   ok(secretInArchive===false,'完整导出脱敏 API Key');
 
-  await ev(`(()=>{window.__mockScenario='summaryFailOnce';window.__mockSummaryFailed=false;const p=document.getElementById('agentRoundPrompt');p.value='再次检查营地与周边环境。';p.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('runAgentRound').click();return true;})()`);
-  let failed=null;for(let i=0;i<100;i++){failed=await ev(`(()=>{const a=SurvivalAgent.getExperimentArchive();return {round:Number(document.getElementById('agentRoundCount').textContent),reports:document.querySelectorAll('#eventReportList .eventReportCard').length,hour:IslandApp.getWorldState().hour,pending:Boolean(a?.current.pending_report),retryVisible:!document.getElementById('retryEventReport').hidden,points:document.getElementById('eventMarkers').childElementCount};})()`);if(failed.pending&&failed.retryVisible)break;await sleep(100);}
-  ok(failed?.round===2&&failed.reports===1&&failed.pending&&Math.abs(failed.hour-.5)<1e-9,'报告格式错误时不提交世界/时钟，保留待重试报告');
-  ok(failed?.points===2,'报告待重试时地图仍保留待结算点位预览');
+  await ev(`(()=>{window.__mockScenario='summaryAlwaysEmpty';const p=document.getElementById('agentRoundPrompt');p.value='再次检查营地与周边环境。';p.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('runAgentRound').click();return true;})()`);
+  let recovered=null;for(let i=0;i<120;i++){recovered=await ev(`(()=>{const a=SurvivalAgent.getExperimentArchive();return {round:Number(document.getElementById('agentRoundCount').textContent),reports:document.querySelectorAll('#eventReportList .eventReportCard').length,hour:IslandApp.getWorldState().hour,pending:Boolean(a?.current.pending_report),card:document.querySelector('#eventReportList .eventReportCard')?.textContent||'',archive:JSON.stringify(a?.rounds[1]?.model_responses||[])};})()`);if(recovered.round===2&&recovered.reports===2&&!recovered.pending)break;await sleep(100);}
+  ok(recovered?.reports===2&&Math.abs(recovered.hour-1)<1e-9&&!recovered.pending,'摘要续写和紧凑重建均为空时仍自动整理报告并完成结算');
+  ok(recovered?.card.includes('报告整理')&&recovered.card.includes('自动补全'),'自动整理的报告明确说明并展示本轮依据');
+  ok(recovered?.archive.includes('截断'),'空续写前收到的原始片段仍保留在模型记录');
+
+  await ev(`(()=>{window.__mockScenario='summaryLengthRecovered';const p=document.getElementById('agentRoundPrompt');p.value='继续观察营地周边。';p.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('runAgentRound').click();return true;})()`);
+  let retried=null;for(let i=0;i<120;i++){retried=await ev(`(()=>{const a=SurvivalAgent.getExperimentArchive();return {round:Number(document.getElementById('agentRoundCount').textContent),reports:document.querySelectorAll('#eventReportList .eventReportCard').length,hour:IslandApp.getWorldState().hour,pending:Boolean(a?.current.pending_report),card:document.querySelector('#eventReportList .eventReportCard')?.textContent||''};})()`);if(retried.round===3&&retried.reports===3&&!retried.pending)break;await sleep(100);}
+  ok(retried?.reports===3&&Math.abs(retried.hour-1.5)<1e-9&&!retried.pending,'完整报告 JSON 即使 finish_reason=length 也能恢复并只结算一次');
+  ok(retried?.card.includes('恢复后的完整报告摘要')&&!retried.card.includes('模型简报没有完整返回'),'恢复出来的完整模型报告按原结果展示');
+
+  await ev(`(()=>{window.__mockScenario='bodySummaryEmpty';const p=document.getElementById('agentRoundPrompt');p.value='继续观察营地周边。';p.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('runAgentRound').click();return true;})()`);
+  let bodyRecovered=null;for(let i=0;i<120;i++){bodyRecovered=await ev(`(()=>{const a=SurvivalAgent.getExperimentArchive();return {round:Number(document.getElementById('agentRoundCount').textContent),reports:document.querySelectorAll('#eventReportList .eventReportCard').length,hour:IslandApp.getWorldState().hour,pending:Boolean(a?.current.pending_report),card:document.querySelector('#eventReportList .eventReportCard')?.textContent||''};})()`);if(bodyRecovered.round===4&&bodyRecovered.reports===4&&!bodyRecovered.pending)break;await sleep(100);}
+  ok(bodyRecovered?.reports===4&&Math.abs(bodyRecovered.hour-2)<1e-9&&!bodyRecovered.pending,'人体感受模型无文本时仍整理报告并完成一次结算');
+  ok(bodyRecovered?.card.includes('人体 Agent 感受')&&bodyRecovered.card.includes('报告整理'),'人体感受自动补全文字且标注整理情况');
+
+  await ev(`(()=>{window.__mockScenario='planFailOnce';window.__mockPlanFailed=false;const p=document.getElementById('agentRoundPrompt');p.value='再检查一次营地。';p.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('runAgentRound').click();return true;})()`);
+  let planPending=null;for(let i=0;i<120;i++){planPending=await ev(`(()=>{const a=SurvivalAgent.getExperimentArchive();return {round:Number(document.getElementById('agentRoundCount').textContent),reports:document.querySelectorAll('#eventReportList .eventReportCard').length,hour:IslandApp.getWorldState().hour,pending:Boolean(a?.current.pending_report),retryVisible:!document.getElementById('retryEventReport').hidden};})()`);if(planPending.pending&&planPending.retryVisible)break;await sleep(100);}
+  ok(planPending?.round===5&&planPending.reports===4&&planPending.pending&&Math.abs(planPending.hour-2)<1e-9,'行动时间线模型返回无效内容时保留可重试状态且不提前结算');
   await ev(`document.getElementById('retryEventReport').click();true`);
-  let retried=null;for(let i=0;i<100;i++){retried=await ev(`(()=>{const a=SurvivalAgent.getExperimentArchive();return {round:Number(document.getElementById('agentRoundCount').textContent),reports:document.querySelectorAll('#eventReportList .eventReportCard').length,hour:IslandApp.getWorldState().hour,pending:Boolean(a?.current.pending_report),archive:JSON.stringify(a?.rounds[1]?.model_responses||[])};})()`);if(retried.round===2&&retried.reports===2&&!retried.pending)break;await sleep(100);}
-  ok(retried?.reports===2&&Math.abs(retried.hour-1)<1e-9&&!retried.pending,'重试成功后只结算一次并生成第二轮报告');
-  ok(retried?.archive.includes('本次注入的格式失败')&&retried?.archive.includes('求生者在营地完成周边观察'),'报告首次失败与重试成功的原文都留在对应轮次归档');
+  let planRetried=null;for(let i=0;i<120;i++){planRetried=await ev(`(()=>{const a=SurvivalAgent.getExperimentArchive();return {round:Number(document.getElementById('agentRoundCount').textContent),reports:document.querySelectorAll('#eventReportList .eventReportCard').length,hour:IslandApp.getWorldState().hour,pending:Boolean(a?.current.pending_report)};})()`);if(planRetried.round===5&&planRetried.reports===5&&!planRetried.pending)break;await sleep(100);}
+  ok(planRetried?.reports===5&&Math.abs(planRetried.hour-2.5)<1e-9&&!planRetried.pending,'计划重试成功后只结算一次并完成报告');
 
   await send('Runtime.evaluate',{expression:"document.getElementById('exportExperimentPdf').click()",userGesture:true,returnByValue:true});
   let exportTarget=null;for(let i=0;i<30&&!exportTarget;i++){const list=await targets();exportTarget=list.find(t=>t.type==='page'&&t.title?.includes('OLORUA 完整实验记录'));if(!exportTarget)await sleep(100);}
@@ -139,7 +163,7 @@ try{
     await new Promise(r=>pdfWs.onopen=r);
     const pdfSend=(method,params={})=>new Promise((res,rej)=>{const i=++pdfId;pdfPending.set(i,{res,rej});pdfWs.send(JSON.stringify({id:i,method,params}));});
     const pdfText=await pdfSend('Runtime.evaluate',{expression:'document.body.innerText',returnByValue:true});
-    ok(pdfText.result?.value?.includes('第 2 轮')&&pdfText.result.value.includes('参数单位对照'),'导出页包含跨轮记录与参数单位表');
+    ok(pdfText.result?.value?.includes('第 5 轮')&&pdfText.result.value.includes('参数单位对照'),'导出页包含跨轮记录与参数单位表');
     const pdfData=await pdfSend('Page.printToPDF',{printBackground:true});
     ok((pdfData.data||'').length>1000,'浏览器成功生成完整记录 PDF 数据');
     pdfWs.close();

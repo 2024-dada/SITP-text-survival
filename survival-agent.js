@@ -444,7 +444,10 @@
             const recovered = await send(messages.concat({ role: 'user', content: '上次 JSON 被截断且续写为空。请重新返回完整的紧凑 JSON，缩短各字段文字，不省略字段。' }), null, null, MAX_COMPLETION_TOKENS);
             const recoveredText = typeof recovered.message.content === 'string' ? recovered.message.content : '';
             recordAgentResponse(systemId, recoveredText, recovered.finishReason, '报告紧凑重建');
-            if (recoveredText.trim() && recovered.finishReason !== 'length') {
+            if (recoveredText.trim()) {
+              // A provider may mark a complete JSON object as "length" when
+              // it ends exactly at the output boundary. Validate the payload
+              // itself instead of rejecting it by finish_reason alone.
               parseModelJson(recoveredText, '重建报告');
               recovered.message._responseSegments = [recoveredText];
               return recovered.message;
@@ -1483,6 +1486,52 @@
     });
   }
 
+  function fallbackBodySummary(pending, settlement) {
+    const body = pending.context.body || {};
+    const survivor = (pending.context.agent_outputs || []).find(agent => agent.agent === '求生者 Agent');
+    const statement = String(body.after_statement || survivor?.statement || '').trim();
+    const steps = settlement?.steps || pending.plan?.steps || [];
+    if (statement) return `我的状态描述：${statement}${(body.parameter_changes || []).length ? `；本轮记录了 ${(body.parameter_changes || []).length} 项人体参数变化，具体数值见下方。` : ''}`.slice(0, 260);
+    if (!steps.length) return '本轮没有安排具体行动；身体感受按求生者 Agent 已提交的状态描述记录。';
+    const activities = [...new Set(steps.map(step => String(step.activity || '').trim()).filter(Boolean))].slice(0, 3);
+    const minutes = settlement?.durationMinutes || steps.reduce((sum, step) => sum + (Number(step.durationMinutes || step.duration_minutes) || 0), 0);
+    const physicalEffort = steps.some(step => /行走|前往|寻找|采集|捕鱼|捕捞|搬|搭建|砍|攀|爬|收集|搬运|处理|生火/.test(String(step.activity || '')));
+    const activityText = activities.join('、') || '本轮行动';
+    const sensation = physicalEffort
+      ? '结合活动内容和时长推测，连续行动后可能会有些疲惫，需要休息并留意补水。'
+      : '结合活动内容和时长推测，本轮身体负荷较轻。';
+    const changes = (body.parameter_changes || []).length;
+    return `这轮我进行了${activityText}，累计行动约 ${minutes} 分钟。${sensation}${changes ? `人体参数记录了 ${changes} 项变化，具体数值见下方。` : ''}`.slice(0, 260);
+  }
+
+  function fallbackEventNarrative(pending, plan, settlement, noActivitySettlement) {
+    const steps = settlement?.steps || [];
+    const timeline = steps.length ? steps : (plan.steps || []);
+    const outcomes = timeline.map((step, index) => {
+      const time = step.timeLabel || step.time_label || `第 ${index + 1} 项`;
+      const activity = String(step.activity || '行动').trim();
+      const probability = Number.isFinite(step.probability) ? step.probability : Number(step.probability_percent);
+      const result = String(step.resultText || (step.sampledSuccess ? step.success_result : step.failure_result) || '').trim();
+      const sampled = typeof step.sampledSuccess === 'boolean' ? `，种子抽样${step.sampledSuccess ? '命中' : '未中'}` : '';
+      const settled = typeof step.success === 'boolean' ? `，实际${step.success ? '完成' : '未完成'}` : '';
+      return `${time} ${activity}${Number.isFinite(probability) ? `，推算成功率 ${probability}%` : ''}${sampled}${settled}${result ? `：${result}` : ''}`;
+    });
+    const first = steps[0];
+    const last = steps[steps.length - 1];
+    const beforeScene = String(first?.sceneBefore || pending.context.current_scene || '').trim();
+    const afterScene = String(last?.sceneAfter || beforeScene).trim();
+    return {
+      human_summary: outcomes.length
+        ? outcomes.join('；').slice(0, 1200)
+        : String(plan.summary || pending.context.researcher_prompt || '本轮 Agent 推理已提交，没有安排具体行动时段。').slice(0, 500),
+      body_summary: fallbackBodySummary(pending, settlement),
+      before_scene: beforeScene,
+      after_scene: afterScene,
+      island_summary: settlement?.summary || noActivitySettlement,
+      recovery_note: '模型简报没有完整返回，已根据本轮 Agent 结果、行动时间线和结算记录自动补全。'
+    };
+  }
+
   async function generateBodySummary(settings, pending, eventStatus) {
     if (pending.bodySummary) return pending.bodySummary;
     const context = {
@@ -1607,6 +1656,7 @@
       reportField(card, '点位依据', report.pointReason);
       reportField(card, '事件概要', report.humanSummary);
       reportField(card, '人体 Agent 感受', report.bodySummary);
+      reportField(card, '报告整理', report.recoveryNote);
       reportField(card, '人体框架参数变化', reportBodyChanges(report));
       reportField(card, '本轮状态结算', report.settlementSummary);
       reportField(card, '事件前看到的景象', report.beforeScene);
@@ -1616,7 +1666,7 @@
     }
     const previewMarkers = (active?.pendingEventReport?.plan?.steps || []).flatMap(step => {
       const point = active.pendingEventReport.context.event_candidates.find(candidate => candidate.id === step.point_id);
-      return point ? [{ ...point, title: `待结算 · ${step.time_label} ${step.activity}` }] : [];
+      return point ? [{ ...point, round: active.pendingEventReport.context.round, title: `待结算 · ${step.time_label} ${step.activity}` }] : [];
     });
     const markers = [...(active?.eventMarkers || []), ...previewMarkers];
     G.IslandApp?.setEventMarkers(markers);
@@ -1689,7 +1739,7 @@
       // A planned location is a preview, not a committed resource change.
       const previews = plan.steps.flatMap(step => {
         const point = pending.context.event_candidates.find(candidate => candidate.id === step.point_id);
-        return point ? [{ ...point, title: `待结算 · ${step.time_label} ${step.activity}` }] : [];
+        return point ? [{ ...point, round: pending.context.round, title: `待结算 · ${step.time_label} ${step.activity}` }] : [];
       });
       G.IslandApp?.setEventMarkers([...active.eventMarkers, ...previews]);
       el('eventMapCount').textContent = `${active.eventMarkers.length + previews.length} 个点位（含待结算）`;
@@ -1709,15 +1759,29 @@
           scene_after_evidence: settlement && M.observe ? M.observe(settlement.world, settlement.position)?.role || '' : pending.context.current_scene,
           island_agent_changes: pending.context.state_changes
         };
-        const response = await requestCompletion(settings, [
+        try {
+          const response = await requestCompletion(settings, [
           { role: 'system', content: '你负责把本轮全部 Agent 推理与行动时间线整理成简洁自然的中文报告，只输出 JSON：human_summary、body_summary、before_scene、after_scene、island_summary，值均为字符串。human_summary 必须概括整条时间线，不能只复述一个行动。逐步结果、种子抽样、天气和状态落账已在输入中给出，必须据此写，不能改写实际结算；每一步的估算是本实验的模拟情景，可具体描述，但不能说成实地观测。body_summary 用第一人称日常语言，把人体参数、单位、前后变化和 survivor_agent 本轮表述转换成感受；缺少数值时结合行动负荷、持续时间、天气和实际结果给出有依据的定性推测，不要以“未配置参数”作为主体内容，不得编造体征数值或医学结论。取到物品不等于已进食或饮水。body_summary 只展示在报告，不写入 Agent 状态、对话历史或下一轮输入。before_scene 和 after_scene 各写一句，依据给出的场景证据及最终天气；island_summary 概括时间线前后天气与已落账的岛屿参数/资源变化，其他字段没有变化时明确写出。' },
           { role: 'user', content: JSON.stringify(resultContext) }
-        ], null, null, 'event_report_summary');
-        pending.narrative = parseModelJson(response.content, '事件简报');
+          ], null, null, 'event_report_summary');
+          pending.narrative = parseModelJson(response.content, '事件简报');
+        } catch (error) {
+          pending.narrative = fallbackEventNarrative(pending, plan, settlement, noActivitySettlement);
+          pending.narrativeRecoveryNote = pending.narrative.recovery_note;
+          pending.narrativeRecoveryError = error.message || String(error);
+        }
       }
 
-      const bodySummary = String(pending.narrative.body_summary || '').trim().slice(0, 260)
-        || await generateBodySummary(settings, pending, settlement?.summary || noActivitySettlement);
+      let bodySummary = String(pending.narrative.body_summary || '').trim().slice(0, 260);
+      if (!bodySummary) {
+        try {
+          bodySummary = await generateBodySummary(settings, pending, settlement?.summary || noActivitySettlement);
+        } catch (error) {
+          bodySummary = fallbackBodySummary(pending, settlement);
+          pending.narrativeRecoveryNote ||= '人体感受简报没有完整返回，已依据求生者状态和本轮行动记录整理。';
+          pending.narrativeRecoveryError ||= error.message || String(error);
+        }
+      }
       if (settlement) prepareEventFrameworkSettlement(active, pending);
       const firstPointStep = settlement?.steps.find(step => step.point) || null;
       const firstCandidate = firstPointStep ? pending.context.event_candidates.find(candidate => candidate.id === firstPointStep.point.id) : null;
@@ -1734,6 +1798,7 @@
         durationMinutes: settlement?.durationMinutes || 0,
         humanSummary: String(pending.narrative.human_summary || plan.summary || ''),
         bodySummary, bodyChanges: pending.context.body.parameter_changes,
+        recoveryNote: pending.narrativeRecoveryNote || '',
         steps: settlement?.steps || [],
         beforeScene: String(pending.narrative.before_scene || ''), afterScene: String(pending.narrative.after_scene || ''),
         islandSummary: [
@@ -1764,7 +1829,7 @@
         for (const step of settlement.steps) {
           if (!step.point) continue;
           const candidate = pending.context.event_candidates.find(item => item.id === step.point.id);
-          if (candidate) active.eventMarkers.push({ ...candidate, title: `${step.timeLabel} ${step.activity}` });
+          if (candidate) active.eventMarkers.push({ ...candidate, round: pending.context.round, title: `${step.timeLabel} ${step.activity}` });
         }
         settlement.markerAdded = true;
       }
@@ -1772,7 +1837,7 @@
       renderFramework();
       setAgentStatus(settlement ? `第 ${pending.context.round} 轮已结算 · 模拟时间 +${settlement.durationMinutes} 分钟` : `第 ${pending.context.round} 轮报告已整理 · 本轮无行动时段`, 'ok');
       status(settlement ? `第 ${pending.context.round} 轮已结算：${settlement.summary}` : `第 ${pending.context.round} 轮报告已整理；没有安排行动时间线。`, 'ok');
-      renderEventReportPanel(active, `第 ${pending.context.round} 轮报告与状态结算已完成。`);
+      renderEventReportPanel(active, `第 ${pending.context.round} 轮报告与状态结算已完成${pending.narrativeRecoveryNote ? '；简报已根据本轮记录自动补全' : ''}。`);
     } catch (error) {
       if (active.pendingEventReport !== pending) {
         renderEventReportPanel(active, `第 ${pending.context.round} 轮状态已提交；界面更新提示：${error.message || String(error)}`);

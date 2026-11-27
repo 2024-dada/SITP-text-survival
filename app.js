@@ -42,6 +42,7 @@ function pause(){if(timer){clearInterval(timer);timer=null;}$('play').textConten
 function step(n){M.tick(state,n);state.selected=position.slice();render();}
 // Camera only: zoom never modifies world time, selected position or inventories.
 const fullMapView={x:-380,y:-525,width:820,height:1030};
+let focusedEventMarkerIndex=-1;
 const mapPanZoomThreshold=1.05,mapDragThreshold=3;
 function mapCoordinates(e){let pt=$('map').createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;return pt.matrixTransform($('map').getScreenCTM().inverse());}
 function mapCoordinatesWith(e,matrix){let pt=$('map').createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;return pt.matrixTransform(matrix);}
@@ -50,6 +51,22 @@ function mapZoom(){return fullMapView.width/$('map').viewBox.baseVal.width;}
 function updateMapCursor(){$('map').classList.toggle('panReady',mapZoom()>mapPanZoomThreshold);}
 function finishMapPan(e,cancelled=false){if(!mapPan)return;const pan=mapPan,map=$('map');mapPan=null;map.classList.remove('mapPanning');if(map.hasPointerCapture(pan.pointerId))map.releasePointerCapture(pan.pointerId);suppressMapClick=!cancelled&&pan.dragged;if(!cancelled&&pan.dragged&&!locked&&e){const p=mapPoint(e);if(M.inside(p)){position=p;state.selected=p.slice();render();}}}
 function resetMapView(){if(mapPan)finishMapPan(null,true);$('map').setAttribute('viewBox',`${fullMapView.x} ${fullMapView.y} ${fullMapView.width} ${fullMapView.height}`);$('zoomLevel').textContent='1.0×';updateMapCursor();}
+function focusEventPoint(east,north,index){
+ if(!Number.isFinite(east)||!Number.isFinite(north))return;
+ if(mapPan)finishMapPan(null,true);
+ focusedEventMarkerIndex=index;
+ const width=fullMapView.width/4,height=fullMapView.height/4,x=east-width/2,y=-north-height/2,map=$('map');
+ map.setAttribute('viewBox',`${x} ${y} ${width} ${height}`);
+ $('zoomLevel').textContent=(fullMapView.width/width).toFixed(1)+'×';
+ updateMapCursor();
+ $('eventMarkers').querySelectorAll('.eventMarker').forEach((marker,i)=>marker.classList.toggle('eventMarkerFocused',i===index));
+ $('eventPointControls').querySelectorAll('[data-event-point-index]').forEach(button=>button.setAttribute('aria-pressed',Number(button.dataset.eventPointIndex)===index?'true':'false'));
+}
+$('eventPointControls').addEventListener('click',e=>{
+ const button=e.target.closest('[data-event-point-index]');
+ if(!button)return;
+ focusEventPoint(Number(button.dataset.east),Number(button.dataset.north),Number(button.dataset.eventPointIndex));
+});
 $('map').addEventListener('wheel',e=>{
  if(e.ctrlKey)return; // Preserve the browser's Ctrl+wheel accessibility zoom.
  e.preventDefault();
@@ -103,6 +120,26 @@ drawBase();render();updateMapCursor();
 
 $('nextRain').onclick=()=>{pause();let target=null;for(let i=1;i<=24*60*4;i++){let h=state.hour+i*.25;if(M.weather(h,state.seed).rain>0&&M.weather(h-.25,state.seed).rain===0){target=Math.max(state.hour,h-.25);break;}}if(target!==null){if(target>state.hour)step(target-state.hour);toast('已到下一场雨进入东岸前；按+15分钟观察雨带向西推进。');}else toast('未来60天未找到新的降雨起点。');};
 
-function setEventMarkers(markers=[]){const layer=$('eventMarkers');layer.replaceChildren();for(const [index,item] of markers.entries()){const east=Number(item.east_m),north=Number(item.north_m);if(!Number.isFinite(east)||!Number.isFinite(north))continue;const group=svg('g',{transform:`translate(${east},${-north})`,class:'eventMarker'});group.append(svg('title',{},`${index+1}. ${item.title||'行动点位'} · ${item.name||''}`),svg('circle',{r:16,fill:'#a74932',stroke:'#fff8eb','stroke-width':3}),svg('circle',{r:19,fill:'none',stroke:'#a74932','stroke-width':1.5,opacity:.75}),svg('text',{y:4,'text-anchor':'middle','font-size':11,'font-weight':700,fill:'#fff'},String(index+1)));layer.append(group);}}
+function setEventMarkers(markers=[]){
+ const layer=$('eventMarkers'),controls=$('eventPointControls'),valid=markers.filter(item=>Number.isFinite(Number(item.east_m))&&Number.isFinite(Number(item.north_m)));
+ layer.replaceChildren();controls.replaceChildren();
+ if(!valid.length){controls.hidden=true;focusedEventMarkerIndex=-1;return;}
+ controls.hidden=false;
+ const label=document.createElement('strong');label.textContent='定位模拟点位';controls.append(label);
+ for(const [index,item] of valid.entries()){
+  const east=Number(item.east_m),north=Number(item.north_m),round=Number(item.round),title=String(item.title||'行动点位'),time=title.match(/\d{1,2}:\d{2}/)?.[0];
+  const group=svg('g',{transform:`translate(${east},${-north})`,class:`eventMarker${index===focusedEventMarkerIndex?' eventMarkerFocused':''}`});
+  group.append(svg('title',{},`${index+1}. ${title} · ${item.name||''}`),svg('circle',{r:16,fill:'#a74932',stroke:'#fff8eb','stroke-width':3}),svg('circle',{r:19,fill:'none',stroke:'#a74932','stroke-width':1.5,opacity:.75}),svg('text',{y:4,'text-anchor':'middle','font-size':11,'font-weight':700,fill:'#fff'},String(index+1)));
+  layer.append(group);
+  const button=document.createElement('button');
+  button.type='button';button.className='eventPointButton';
+  button.dataset.eventPointIndex=String(index);button.dataset.east=String(east);button.dataset.north=String(north);
+  button.setAttribute('aria-pressed',index===focusedEventMarkerIndex?'true':'false');
+  button.setAttribute('aria-label',`定位到第 ${round||1} 轮，${title}，${item.name||'点位'}，东向 ${east.toFixed(1)} 米、北向 ${north.toFixed(1)} 米`);
+  button.title=`${title} · ${item.name||''} · E ${east.toFixed(1)} m / N ${north.toFixed(1)} m`;
+  button.textContent=`${String(index+1).padStart(2,'0')} · ${round?`第${round}轮`:'点位'}${time?` · ${time}`:''}`;
+  controls.append(button);
+ }
+}
 
 globalThis.IslandApp=Object.freeze({getWorldState:()=>state,getPosition:()=>position.slice(),pause,setEventMarkers,setWorldState(next,focusPosition){M.validate(next);if(focusPosition&&!M.inside(focusPosition))throw Error('求生者位置必须在岛上');const previousState=state,previousPosition=position.slice(),previousLocked=locked;pause();try{state=next;if(focusPosition){position=focusPosition.slice();locked=true;}state.selected=position.slice();render();}catch(error){state=previousState;position=previousPosition;locked=previousLocked;render();throw error;}}});
