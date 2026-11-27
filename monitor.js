@@ -8,32 +8,32 @@
     par_geo_002: '岛屿参考点经度',
     par_geo_003: '细分格边长',
     par_geo_004_weight_power: '地理观测权重指数',
-    par_geo_004_edge_fade_m: '海岸边缘淡化距离（米）',
-    par_obs_001_near_m: '近景观测距离（米）',
-    par_obs_001_mid_m: '中景观测距离（米）',
-    par_obs_001_land_patch_max_m: '陆地斑块最大观测距离（米）',
-    par_obs_001_day_dry_m: '日间干燥天气观测距离（米）',
-    par_obs_001_day_light_rain_m: '日间小雨观测距离（米）',
-    par_obs_001_day_heavy_rain_m: '日间大雨观测距离（米）',
-    par_obs_001_night_m: '夜间观测距离（米）',
-    par_obs_002_r06_max_m: 'R06 最大观测距离（米）',
-    par_obs_002_fish_far_threshold_m: '鱼类远距判断阈值（米）',
+    par_geo_004_edge_fade_m: '海岸边缘淡化距离',
+    par_obs_001_near_m: '近景观测距离',
+    par_obs_001_mid_m: '中景观测距离',
+    par_obs_001_land_patch_max_m: '陆地斑块最大观测距离',
+    par_obs_001_day_dry_m: '日间干燥天气观测距离',
+    par_obs_001_day_light_rain_m: '日间小雨观测距离',
+    par_obs_001_day_heavy_rain_m: '日间大雨观测距离',
+    par_obs_001_night_m: '夜间观测距离',
+    par_obs_002_r06_max_m: 'R06 最大观测距离',
+    par_obs_002_fish_far_threshold_m: '鱼类远距判断阈值',
     epoch_year: '模拟起始年份',
     epoch_month: '模拟起始月份',
     epoch_day: '模拟起始日期',
     epoch_constructor_hour: '模拟起始小时',
     par_time_002: '天气模拟时间步长',
     par_time_003: '天气取样随机种子',
-    par_wx_001: '天气参数 001（注册表未附具体释义）',
-    par_wx_002: '天气参数 002（注册表未附具体释义）',
+    par_wx_001: '天气更新时间步长（按规则推定）',
+    par_wx_002: '降雨持续时间（按规则推定）',
     par_wx_004_background_rain: '背景降雨系数',
     par_wx_004_localized_rain: '局部降雨系数',
     par_wx_004_approaching_floor: '接近雨带下限系数',
     par_wx_004_dry_cap: '干燥条件上限参数',
-    par_sun_001: '日照参数 001（注册表未附具体释义）',
-    par_tide_001_amplitude_m: '潮位振幅（米）',
-    par_tide_001_period_hours: '潮位周期（小时）',
-    par_tide_001_baseline_m: '潮位基准（米）',
+    par_sun_001: '日照时刻偏移（按字段推定）',
+    par_tide_001_amplitude_m: '潮位振幅',
+    par_tide_001_period_hours: '潮位周期',
+    par_tide_001_baseline_m: '潮位基准',
     dataset_ds_b_days: '天气数据总天数',
     dataset_ds_b_rainy_days: '天气数据中的雨日数',
     dataset_ds_b_start_rows: '雨日开始时刻数据行数',
@@ -54,10 +54,82 @@
     edge: '边缘', fade: '渐变距离', weight: '权重', power: '指数', near: '近距', mid: '中距', land: '陆地', patch: '斑块', light: '小雨', heavy: '大雨',
     night: '夜间', floor: '下限', flag: '开关', l: '升', m: '米', c: '摄氏度', h: '小时'
   };
-  const units = [
-    ['_l_per_mm', '升/毫米'], ['_l_per_day', '升/日'], ['_mm_h', '毫米/小时'], ['_m_s', '米/秒'],
-    ['_days', '天'], ['_hours', '小时'], ['_minutes', '分钟'], ['_hour', '小时'], ['_m', '米'], ['_l', '升'], ['_c', '℃']
-  ];
+  const unitSuffixes = ['_l_per_mm', '_l_per_day', '_mm_h', '_m_s', '_days', '_hours', '_minutes', '_hour', '_m', '_l', '_c'];
+
+  const exactUnits = {
+    par_geo_001: '°（纬度；负值为南）', par_geo_002: '°（经度；负值为西）', par_geo_003: '米',
+    par_geo_004_weight_power: '1（幂指数）', par_time_002: '小时', par_time_003: '编号（随机种子）',
+    par_wx_001: '小时（步长推定）', par_wx_002: '小时（持续时间推定）', par_sun_001: '小时（日照时刻偏移推定）',
+    skin_blood_flow_ml_min: '毫升/分钟', shivering_heat_ml_min: '毫升/分钟', sweat_rate_ml_h: '毫升/小时',
+    heart_rate_bpm: '次/分钟', systolic_bp_mmhg: 'mmHg', diastolic_bp_mmhg: 'mmHg',
+    cardiac_output_l_min: '升/分钟', respiratory_rate_bpm: '次/分钟', tidal_volume_ml: '毫升', minute_ventilation_l_min: '升/分钟',
+    par_tide_001_amplitude_m: '米', par_tide_001_period_hours: '小时', par_tide_001_baseline_m: '米',
+    par_water_003_min_factor: '1（温度影响倍率）', par_water_003_max_factor: '1（温度影响倍率）',
+    par_site_001_default_if_null: '1（湿润度比例）', par_site_001_min: '1（湿润度比例）', par_site_001_max: '1（湿润度比例）',
+    par_site_001_rain_per_hour: '小时⁻¹（湿润度变化率）', par_site_001_dry_per_hour: '小时⁻¹（湿润度变化率）',
+    par_eco_003_wet_peak: '1（季节生长倍率）', par_eco_003_wet_to_dry: '1（季节生长倍率）',
+    par_eco_003_dry: '1（季节生长倍率）', par_eco_003_dry_to_wet: '1（季节生长倍率）',
+    par_eco_004_minimum_adults: '个成体单位（R05 按千克生物量计）',
+    par_eco_004_condition_range_item_1: '1（状态比例下限）', par_eco_004_condition_range_item_2: '1（状态比例上限）',
+    par_eco_004_heat_start_c: '℃', par_eco_004_heat_slope: '℃⁻¹（温度修正斜率）', par_eco_004_heat_floor: '1（最低保留倍率）',
+    par_surv_001_rain_factor: '1（雨天移动速度倍率）',
+    dataset_ds_a_shoreline_vertices: '个岸线顶点', dataset_ds_a_macro_zones: '个宏观分区',
+    dataset_ds_a_dem_points: '个高程点', dataset_ds_a_cells: '个网格单元', dataset_ds_a_sites: '个资源点',
+    dataset_ds_b_days: '天', dataset_ds_b_rainy_days: '天', dataset_ds_b_start_rows: '行', dataset_ds_b_start_seed: '编号（随机种子）',
+    dataset_ds_c_sites: '个资源点', dataset_ds_c_pool_types: '种资源类型', dataset_ds_c_water_points: '个蓄水点',
+    dataset_ds_eco_habitats: '类栖地', dataset_ds_eco_species_groups: '组物种', dataset_ds_sample_seed: '编号（随机种子）'
+  };
+
+  function foodUnit(code) {
+    return /browse/i.test(code) ? '千克干物质' : '千克食源折算';
+  }
+
+  function parameterUnit(code) {
+    const key = String(code).toLowerCase();
+    if (exactUnits[key]) return exactUnits[key];
+    if (key === 'epoch_year') return '年';
+    if (key === 'epoch_month') return '月';
+    if (key === 'epoch_day') return '日';
+    if (key === 'epoch_constructor_hour') return '时';
+    if (/_active_at_start_flag$|_flag$/.test(key)) return '0/1（布尔开关）';
+    if (/_l_per_mm(?:_item_\d+)?$/.test(key)) return '升/毫米';
+    if (/_l_per_day(?:_item_\d+)?$/.test(key)) return '升/日';
+    if (/_mm_h(?:_item_\d+)?$/.test(key)) return '毫米/小时';
+    if (/_m_s$/.test(key)) return '米/秒';
+    if (/_annualregrowth$/.test(key)) return foodUnit(key) + '/年';
+    if (/_stock$|_capacity$/.test(key) && /par_eco_001/.test(key)) return foodUnit(key);
+    if (/_usable$|_condition$/.test(key) && /par_eco_001/.test(key)) return '1（比例）';
+    const intake = key.match(/par_eco_002_(r\d+)_intake$/);
+    if (intake) {
+      if (intake[1] === 'r04') return '千克干物质/（成年等效只·日）';
+      if (intake[1] === 'r05') return '千克食源折算/（千克鱼体生物量·日）';
+      if (intake[1] === 'r06') return '千克食源折算/（个贝·日）';
+      if (intake[1] === 'r07') return '千克食源折算/（只·日）';
+      return '千克食源折算/（只·日）';
+    }
+    const recruits = key.match(/par_eco_002_(r\d+)_recruits$/);
+    if (recruits) return recruits[1] === 'r05' ? '年⁻¹（单位生物量补充率）' : '新个体/（成年个体·年）';
+    if (/par_eco_002_r\d+_mortality_item_\d+$/.test(key)) return '年⁻¹（年死亡率）';
+    if (/par_eco_002_r\d+_(?:stage_days_item_\d+|maturity)$/.test(key)) return '天';
+    if (/par_eco_002_r05_step$/.test(key)) return '千克鱼体生物量';
+    if (/par_eco_004_condition_range_item_\d+$/.test(key)) return '1（状态比例边界）';
+    if (/par_eco_004_heat_start_c$/.test(key)) return '℃';
+    if (/par_eco_004_heat_slope$/.test(key)) return '℃⁻¹（温度修正斜率）';
+    if (/par_eco_004_heat_floor$/.test(key)) return '1（最低保留倍率）';
+    if (/par_wx_004_/.test(key) || /_factor$|_probability$|_ratio$|_coefficient$/.test(key)) return '1（无量纲比例或系数）';
+    if (/_position_m_item_\d+$|_bounds_m_item_\d+$|_m_item_\d+$|_m$/.test(key)) return '米';
+    if (/_l$/.test(key)) return '升';
+    if (/_c$/.test(key)) return '℃';
+    if (/_hours?(?:_item_\d+)?$/.test(key)) return '小时';
+    if (/_minutes?(?:_item_\d+)?$/.test(key)) return '分钟';
+    if (/_days?(?:_item_\d+)?$/.test(key)) return '天';
+    if (/_seed$/.test(key)) return '编号（随机种子）';
+    if (/_rows$/.test(key)) return '行';
+    if (/_vertices$|_points$|_cells$|_sites$|_zones$|_habitats$|_groups$|_types$/.test(key)) return '个（数量）';
+    // Unknown numeric fields from user-loaded frameworks still get an explicit
+    // dimensionless unit instead of silently showing a blank unit.
+    return '1（无量纲，未识别字段的暂定推定）';
+  }
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -72,18 +144,15 @@
 
   function parameterName(code) {
     if (exactLabels[code]) return exactLabels[code];
-    let name = code;
-    let unit = '';
-    for (const [suffix, label] of units) {
+    const item = code.match(/_item_(\d+)$/i);
+    let name = code.replace(/_item_\d+$/i, '');
+    for (const suffix of unitSuffixes) {
       if (name.endsWith(suffix)) {
         name = name.slice(0, -suffix.length);
-        unit = label;
         break;
       }
     }
-    const item = code.match(/_item_(\d+)$/i);
     let tokens = name.toLowerCase().split(/[_-]+/).filter(Boolean);
-    if (item && tokens.length >= 2) tokens = tokens.slice(0, -2);
     const translated = [];
     for (const token of tokens) {
       if (['par', 'ds', 'a', 'b', 'c', '001', '002', '003', '004'].includes(token)) continue;
@@ -94,7 +163,6 @@
     }
     if (item) translated.push('第' + item[1] + '项');
     let label = translated.join(' · ') || '参数释义待补充';
-    if (unit && !label.includes(unit)) label += '（' + unit + '）';
     if (/^par_(geo|obs|time|wx|sun|tide|water|site|eco|surv)_\d+$/i.test(code)) label += '（注册表未附具体释义）';
     return label;
   }
@@ -108,9 +176,12 @@
     return String(value);
   }
 
-  function fieldRow(label, code, value) {
+  function fieldRow(label, code, value, unit) {
     const row = element('div', 'monitorFieldRow');
-    row.append(element('span', 'monitorFieldLabel', label), element('code', 'monitorFieldCode', code), element('strong', 'monitorFieldValue', value));
+    const valueGroup = element('span', 'monitorFieldValueGroup');
+    valueGroup.append(element('strong', 'monitorFieldValue', value));
+    if (unit) valueGroup.append(element('small', 'monitorFieldUnit', unit));
+    row.append(element('span', 'monitorFieldLabel', label), element('code', 'monitorFieldCode', code), valueGroup);
     return row;
   }
 
@@ -127,10 +198,10 @@
 
     const summary = element('div', 'monitorAgentSummary');
     summary.append(
-      fieldRow('本地时钟标注', 'time_clock', system.timeClock),
-      fieldRow('参数数量', 'parameters.length', system.parameters.length),
-      fieldRow('事件队列', 'events.length', system.eventCount),
-      fieldRow('已记录修改', 'frameworkCommandLog', system.changeCount)
+      fieldRow('本地时钟标注', 'time_clock', system.timeClock, '模拟时间'),
+      fieldRow('参数数量', 'parameters.length', system.parameters.length, '项'),
+      fieldRow('事件队列', 'events.length', system.eventCount, '条'),
+      fieldRow('已记录修改', 'frameworkCommandLog', system.changeCount, '项')
     );
     card.append(summary);
 
@@ -140,7 +211,7 @@
       const list = element('div', 'monitorFieldList');
       for (const parameter of system.parameters) {
         const sensitive = /api[-_]?key|token|secret|password|credential/i.test(parameter.code);
-        list.append(fieldRow(parameterName(parameter.code), parameter.code, sensitive ? '已隐藏' : parameterValue(parameter.code, parameter.value)));
+        list.append(fieldRow(parameterName(parameter.code), parameter.code, sensitive ? '已隐藏' : parameterValue(parameter.code, parameter.value), parameterUnit(parameter.code)));
       }
       parameters.append(list);
     } else {
@@ -164,7 +235,7 @@
     heading.firstChild.append(element('h3', '', title), element('code', '', source));
     card.append(heading);
     const list = element('div', 'monitorPlatformFields');
-    for (const row of rows) list.append(fieldRow(row[0], row[1], row[2]));
+    for (const row of rows) list.append(fieldRow(row[0], row[1], row[2], row[3]));
     card.append(list);
     if (extra) card.append(extra);
     return card;
@@ -179,7 +250,7 @@
     }
 
     root.append(platformCard('全局实验参数', 'framework_param', [
-      ['仿真步长（分钟）', 'framework_param.time_delta', snapshot.run.timeDelta]
+      ['仿真步长', 'framework_param.time_delta', snapshot.run.timeDelta, '分钟']
     ]));
     updated.textContent = '实时更新 · ' + new Date().toLocaleTimeString();
   }
@@ -189,6 +260,7 @@
     render(G.SurvivalAgent.getMonitorSnapshot());
   }
 
+  G.SITPParameterUnits = Object.freeze({ get: parameterUnit });
   document.addEventListener('sitp:monitor-update', update);
   update();
 })(globalThis);

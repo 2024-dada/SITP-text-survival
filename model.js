@@ -76,7 +76,7 @@
   }
   for(const rid of rids){const m=eco.monthly[rid];m.births+=births[rid]||0;m.matured+=matured[rid]||0;m.deaths+=deaths[rid]||0;}
   eco.carrying=caps;eco.lastDaily={rainMm,temperature:temp,growth,consumption,foodAdequacy:adequacy};
-  for(const rid of rids)if(day%30===0){let m=eco.monthly[rid],st=populationStages(s,rid,day),label=ECOLOGY_CONFIG.species[rid].name,decimals=rid==='R05'?1:0;if(m.births||m.matured||m.deaths)event(s,`${label}生态月报：新增幼体 ${m.births.toFixed(decimals)}、成熟 ${m.matured.toFixed(decimals)}、自然损失 ${m.deaths.toFixed(decimals)}；当前幼体 ${st.young.toFixed(decimals)}、亚成体 ${(st.juvenile+st.subadult).toFixed(decimals)}、成体 ${st.adult.toFixed(decimals)}（模拟）`);m.births=0;m.matured=0;m.deaths=0;}
+  for(const rid of rids)if(day%30===0){let m=eco.monthly[rid],st=populationStages(s,rid,day),label=ECOLOGY_CONFIG.species[rid].name,unit=D.pools[rid].unit,decimals=rid==='R05'?1:0,format=n=>`${n.toFixed(decimals)} ${unit}`;if(m.births||m.matured||m.deaths)event(s,`${label}生态月报：新增幼体 ${format(m.births)}、成熟 ${format(m.matured)}、自然损失 ${format(m.deaths)}；当前幼体 ${format(st.young)}、亚成体 ${format(st.juvenile+st.subadult)}、成体 ${format(st.adult)}（模拟）`);m.births=0;m.matured=0;m.deaths=0;}
   eco.dayRainMm=0;eco.dayTemperature=0;eco.dayHours=0;
  }
  function tick(s,n=1){if(!Number.isInteger(n*4)||n<.25||n>24*366*5)throw Error('单次推进15分钟至5年');for(let h=0;h<n*4;h++){const dt=.25;
