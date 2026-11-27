@@ -1137,6 +1137,337 @@
     return messages;
   }
 
+  function eventResourceIntent(text) {
+    if (/捕鱼|抓鱼|钓鱼|捕捞|捞鱼|鱼类/.test(text)) return { resourceId: 'R05', name: '捕鱼' };
+    if (/椰子|椰果|椰汁/.test(text)) return { resourceId: 'R03', name: '采摘椰果' };
+    if (/贝类|海贝|捡贝/.test(text)) return { resourceId: 'R06', name: '采集贝类' };
+    if (/螃蟹|抓蟹|甲壳类/.test(text)) return { resourceId: 'R07', name: '采集近岸甲壳类' };
+    if (/枯木|木柴|捡木|收集木/.test(text)) return { resourceId: 'R01', name: '收集枯木' };
+    if (/石块|石头|石材/.test(text)) return { resourceId: 'R09', name: '采集石块' };
+    return null;
+  }
+
+  function eventCandidates(world, position, actionText) {
+    const intent = eventResourceIntent(actionText);
+    const currentSites = new Map(world.sites.map(site => [site.id, site]));
+    const sites = M.D.sites.map(site => {
+      const point = [site.east_m, site.north_m];
+      if (!M.inside(point)) return null;
+      const current = currentSites.get(site.id);
+      const pools = (current ? current.pools : site.stocks.map(stock => ({ ...stock, amount: stock.initial })))
+        .filter(pool => Number.isFinite(pool.amount) && pool.amount > 0)
+        .filter(pool => !intent || pool.resource === intent.resourceId)
+        .map(pool => ({ resource: pool.resource, name: M.D.pools[pool.resource]?.name || pool.resource, amount: pool.amount, unit: pool.unit }));
+      if ((intent && !pools.length) || (!intent && !pools.length)) return null;
+      const zone = M.zone(point);
+      return {
+        id: 'site:' + site.id, siteId: site.id, name: site.name, zone: zone?.name || site.zone,
+        east_m: site.east_m, north_m: site.north_m, distance_m: Math.round(Math.hypot(point[0] - position[0], point[1] - position[1])),
+        elevation_m: Math.round(M.terrain(point) * 10) / 10, resources: pools
+      };
+    }).filter(Boolean).sort((a, b) => a.distance_m - b.distance_m).slice(0, 14);
+    if (!intent) {
+      const zone = M.zone(position);
+      sites.unshift({ id: 'observer', name: '研究者当前所在位置', zone: zone?.name || '岛上位置', east_m: position[0], north_m: position[1], distance_m: 0, elevation_m: Math.round(M.terrain(position) * 10) / 10, resources: [] });
+    }
+    return { intent, sites };
+  }
+
+  function changedBodyParameters(beforeFrame, afterFrame) {
+    const before = beforeFrame.systems.find(system => system.system_id === 'survivor_agent');
+    const after = afterFrame.systems.find(system => system.system_id === 'survivor_agent');
+    const oldValues = new Map((before?.parameters || []).map(parameter => [parameter.param, parameter.value]));
+    return (after?.parameters || []).filter(parameter => {
+      if (/api[-_]?key|token|secret|password|credential/i.test(parameter.param)) return false;
+      return oldValues.get(parameter.param) !== parameter.value;
+    }).map(parameter => ({
+      code: parameter.param,
+      before: oldValues.has(parameter.param) ? oldValues.get(parameter.param) : null,
+      after: parameter.value,
+      unit: G.SITPParameterUnits?.get(parameter.param) || '1（无量纲，未识别字段的暂定推定）'
+    }));
+  }
+
+  function buildEventReportContext(world, position, roundNumber, researcherPrompt, beforeFrame, inference) {
+    const actionText = [researcherPrompt, ...inference.results.map(result => result.finalText || '')].filter(Boolean).join('\n').slice(0, 7000);
+    const candidates = eventCandidates(world, position, actionText);
+    const weather = M.weather(world.hour, world.seed, position);
+    const observation = M.observe ? M.observe(world, position) : null;
+    const statements = inference.frame.systems.map(system => ({
+      agent: displayAgentName(system.system_id), statement: String(system.statement || '').slice(0, 700),
+      final_text: String(inference.results.find(result => result.systemId === system.system_id)?.finalText || '').slice(0, 900)
+    }));
+    const bodyBefore = beforeFrame.systems.find(system => system.system_id === 'survivor_agent');
+    const bodyAfter = inference.frame.systems.find(system => system.system_id === 'survivor_agent');
+    const changes = inference.commandLog.filter(command => command.change).slice(0, 24).map(command => ({
+      agent: displayAgentName(command.system_id), field: String(command.change.field || '').slice(0, 100),
+      before: auditValue(command.change.before).slice(0, 180), after: auditValue(command.change.after).slice(0, 180),
+      reason: String(command.change.reason || '').slice(0, 220)
+    }));
+    return {
+      round: roundNumber,
+      researcher_prompt: researcherPrompt,
+      action_text: actionText,
+      world: { seed: world.seed, hour: world.hour, selected_position_m: position, weather: {
+        label: weather.label, rain_mm_h: Math.round(weather.rain * 10) / 10,
+        temperature_c: Math.round(weather.temperature * 10) / 10, daylight: weather.daylight, tide_m: Math.round(weather.tide * 100) / 100
+      } },
+      event_candidates: candidates.sites,
+      resource_intent: candidates.intent,
+      current_scene: observation?.valid ? String(observation.role || '').slice(0, 2200) : '',
+      body: {
+        before_statement: String(bodyBefore?.statement || ''), after_statement: String(bodyAfter?.statement || ''),
+        parameter_changes: changedBodyParameters(beforeFrame, inference.frame)
+      },
+      agent_outputs: statements,
+      state_changes: changes
+    };
+  }
+
+  function parseModelJson(raw, label) {
+    const source = String(raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    const start = source.indexOf('{'), end = source.lastIndexOf('}');
+    if (start < 0 || end <= start) throw new Error(label + '没有返回完整 JSON。');
+    try { return JSON.parse(source.slice(start, end + 1)); }
+    catch { throw new Error(label + '的 JSON 格式不完整，请重试报告。'); }
+  }
+
+  function seededInteger(seed, key, min, max) {
+    return min + Math.floor(M.rnd(seed, key) * (max - min + 1));
+  }
+
+  function worldTimeText(date) {
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')} ${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
+  }
+
+  function weatherText(weather) {
+    return `${weather.label} · ${weather.rain.toFixed(1)} mm/h · ${weather.temperature.toFixed(1)} ℃ · ${weather.daylight ? '白昼' : '夜间'}`;
+  }
+
+  function eventResultFor(plan, context, candidate) {
+    if (!plan.feasible || !candidate) return { randomDraw: null, success: null, resultText: '地图数据中没有确认到可执行点位。' };
+    if (Number.isInteger(plan.probability_percent)) {
+      const key = `event:${context.round}:${plan.event_title}:${candidate.id}`;
+      const draw = M.rnd(context.world.seed, key) * 100;
+      const randomDraw = Math.round(draw * 100) / 100;
+      const success = draw < plan.probability_percent;
+      const outcome = success ? plan.success_result : plan.failure_result;
+      return {
+        randomDraw, success,
+        resultText: `AI推算成功概率 ${plan.probability_percent}%；本次抽样值 ${randomDraw.toFixed(2)}%：${String(outcome).trim()}`
+      };
+    }
+    return { randomDraw: null, success: null, resultText: String(plan.deterministic_result).trim() };
+  }
+
+  function reportField(parent, label, value) {
+    if (!String(value || '').trim()) return;
+    const item = document.createElement('div');
+    const heading = document.createElement('strong');
+    const text = document.createElement('p');
+    item.className = 'eventReportField';
+    heading.textContent = label;
+    text.textContent = String(value);
+    item.append(heading, text);
+    parent.append(item);
+  }
+
+  function reportBodyChanges(report) {
+    if (!report.bodyChanges.length) return report.bodySummary;
+    const changes = report.bodyChanges.map(change => {
+      const before = change.before === null ? '新增' : `${change.before} ${change.unit} → `;
+      return `${change.code}：${before}${change.after} ${change.unit}`;
+    }).join('；');
+    return [report.bodySummary, '数值变化：' + changes].filter(Boolean).join('\n');
+  }
+
+  function renderEventReportPanel(active, statusText) {
+    const list = el('eventReportList');
+    const reports = active?.eventReports || [];
+    list.replaceChildren();
+    if (!reports.length) {
+      const empty = document.createElement('p');
+      empty.className = 'eventReportEmpty';
+      empty.textContent = '还没有事件记录。';
+      list.append(empty);
+    }
+    for (const report of reports) {
+      const card = document.createElement('article');
+      const heading = document.createElement('h3');
+      const result = document.createElement('p');
+      const location = document.createElement('p');
+      card.className = 'eventReportCard';
+      heading.textContent = `第 ${report.round} 轮 · ${report.title}`;
+      result.className = 'eventReportOutcome';
+      result.textContent = report.resultText;
+      card.append(heading, result);
+      if (report.point) {
+        location.className = 'eventReportLocation';
+        location.textContent = `${report.point.name} · ${report.point.zone} · E ${report.point.east_m.toFixed(1)} m / N ${report.point.north_m.toFixed(1)} m`;
+        card.append(location);
+      }
+      reportField(card, '点位依据', report.pointReason);
+      reportField(card, '事件概要', report.humanSummary);
+      reportField(card, '人体指标与感受', reportBodyChanges(report));
+      reportField(card, '事件前看到的景象', report.beforeScene);
+      reportField(card, '事件后看到的景象', report.afterScene);
+      reportField(card, '岛屿变化', report.islandSummary);
+      list.append(card);
+    }
+    if (active?.eventMarkers) G.IslandApp?.setEventMarkers(active.eventMarkers);
+    el('eventMapCount').textContent = `${active?.eventMarkers?.length || 0} 个点位`;
+    el('eventReportStatus').textContent = statusText || (active?.pendingEventReport?.error
+      ? '报告生成失败：' + active.pendingEventReport.error + ' · 本轮已提交，可重试报告。'
+      : reports.length ? `已整理 ${reports.length} 轮事件记录。` : '完成一轮推理后，这里会生成简要事件报告。');
+    el('retryEventReport').hidden = !(active?.pendingEventReport && !busy);
+  }
+
+  function clearEventReportPanel(message) {
+    G.IslandApp?.setEventMarkers([]);
+    el('eventMapCount').textContent = '0 个点位';
+    el('eventReportList').replaceChildren();
+    const empty = document.createElement('p');
+    empty.className = 'eventReportEmpty';
+    empty.textContent = '还没有事件记录。';
+    el('eventReportList').append(empty);
+    el('eventReportStatus').textContent = message || '完成一轮推理后，这里会生成简要事件报告。';
+    el('retryEventReport').hidden = true;
+  }
+
+  async function continueEventReport(settings, active) {
+    const pending = active.pendingEventReport;
+    pending.error = '';
+    renderEventReportPanel(active, '正在整理本轮点位与事件报告……');
+    try {
+      if (!pending.plan) {
+        const response = await requestCompletion(settings, [
+          { role: 'system', content: '你负责根据研究者本轮任务、Agent推理、地图点位、资源、天气和状态变化，判断具体事件及可执行位置。只输出一个 JSON 对象，不要 markdown。字段：has_event(boolean), event_title(string), feasible(boolean), point_id(string或null), probability_percent(integer 0..100或null), duration_min_minutes(integer), duration_max_minutes(integer), success_result(string), failure_result(string), deterministic_result(string), point_reason(string), summary(string)。point_id 必须来自 event_candidates；候选列表为空或没有匹配资源时 feasible=false 且 point_id=null。没有具体行动/事件时 has_event=false。对任何结果存在不确定性的事件或行动，都依据已提供的资源、位置、天气、Agent推理和研究者输入给出0至100的整数推算概率，并分别写出简短的成功与未成功结果；结果内容要符合事件，不编造地图数据未提供支持的具体数值。只有结果确定的事件才将概率设为null，并填写deterministic_result。不要限定某类事件才允许概率，也不要决定抽样结果。对可执行事件给出合理持续时间范围，单位为分钟，最短1、最长1440，min不得大于max；持续时间应符合当前事件，不使用固定通用范围。概率是基于本轮上下文的推算，不要称作实测统计率。' },
+          { role: 'user', content: JSON.stringify(pending.context) }
+        ], null, null, 'event_report_plan');
+        const plan = parseModelJson(response.content, '点位判断');
+        if (typeof plan.has_event !== 'boolean') throw new Error('点位判断缺少 has_event。');
+        if (plan.has_event && typeof plan.feasible !== 'boolean') throw new Error('点位判断缺少 feasible。');
+        if (plan.has_event && plan.feasible) {
+          const chosen = pending.context.event_candidates.find(candidate => candidate.id === plan.point_id);
+          if (!chosen) throw new Error('AI 返回的点位不在地图候选列表中，请重试报告。');
+          if (plan.probability_percent !== null && (!Number.isInteger(plan.probability_percent) || plan.probability_percent < 0 || plan.probability_percent > 100)) throw new Error('事件报告概率必须为0至100的整数或null，请重试报告。');
+          if (!Number.isInteger(plan.duration_min_minutes) || !Number.isInteger(plan.duration_max_minutes) || plan.duration_min_minutes < 1 || plan.duration_max_minutes > 1440 || plan.duration_min_minutes > plan.duration_max_minutes) throw new Error('事件报告耗时范围无效，需为1至1440分钟内的整数范围，请重试报告。');
+          if (Number.isInteger(plan.probability_percent)) {
+            if (!String(plan.success_result || '').trim() || !String(plan.failure_result || '').trim()) throw new Error('事件报告缺少成功或未成功结果描述，请重试报告。');
+          } else if (!String(plan.deterministic_result || '').trim()) throw new Error('确定性事件报告缺少结果描述，请重试报告。');
+        }
+        pending.plan = plan;
+      }
+
+      const plan = pending.plan;
+      if (!plan.has_event) {
+        active.eventReports.push({
+          round: pending.context.round, title: '本轮讨论', resultText: '本轮没有确认具体行动事件。',
+          point: null, pointReason: '', humanSummary: String(plan.summary || '继续输入明确行动后，地图将标注对应点位。'),
+          bodySummary: '', bodyChanges: [], beforeScene: '', afterScene: '', islandSummary: ''
+        });
+        active.pendingEventReport = null;
+        renderEventReportPanel(active, `第 ${pending.context.round} 轮已整理；未形成具体行动点位。`);
+        return;
+      }
+
+      if (!plan.feasible) {
+        active.eventReports.push({
+          round: pending.context.round,
+          title: String(plan.event_title || pending.context.resource_intent?.name || '行动事件').slice(0, 60),
+          resultText: '地图数据中没有确认到可执行点位，本轮未开始行动。',
+          point: null,
+          pointReason: String(plan.point_reason || plan.summary || '现有地图与资源数据不足以确认可执行位置。'),
+          humanSummary: String(plan.summary || '当前地图与资源记录未能支持这项行动。'),
+          bodySummary: '本轮未开始行动。',
+          bodyChanges: pending.context.body.parameter_changes,
+          beforeScene: '', afterScene: '',
+          islandSummary: '未开始行动，未计算行动时段内的岛屿天气变化。'
+        });
+        active.pendingEventReport = null;
+        renderEventReportPanel(active, `第 ${pending.context.round} 轮未确认可执行点位。`);
+        return;
+      }
+
+      const candidate = plan.feasible ? pending.context.event_candidates.find(item => item.id === plan.point_id) : null;
+      if (!pending.outcome) {
+        const duration = seededInteger(pending.context.world.seed, `duration:${pending.context.round}:${plan.event_title}:${candidate.id}`, plan.duration_min_minutes, plan.duration_max_minutes);
+        const point = candidate ? [candidate.east_m, candidate.north_m] : pending.context.world.selected_position_m;
+        const weatherStart = M.weather(pending.context.world.hour, pending.context.world.seed, point);
+        const weatherEnd = M.weather(pending.context.world.hour + duration / 60, pending.context.world.seed, point);
+        const result = eventResultFor(plan, pending.context, candidate);
+        const scene = candidate && M.observe ? M.observe(pending.worldSnapshot, point) : null;
+        pending.outcome = {
+          duration, point, weatherStart: weatherText(weatherStart), weatherEnd: weatherText(weatherEnd),
+          startTime: worldTimeText(weatherStart.date), endTime: worldTimeText(weatherEnd.date),
+          resultText: result.resultText, randomDraw: result.randomDraw, success: result.success,
+          scene: scene?.valid ? String(scene.role || '').slice(0, 2200) : pending.context.current_scene
+        };
+      }
+
+      if (!pending.narrative) {
+        const resultContext = {
+          round: pending.context.round,
+          researcher_prompt: pending.context.researcher_prompt,
+          agents: pending.context.agent_outputs,
+          event: {
+            title: String(plan.event_title || '行动事件').slice(0, 60), feasible: Boolean(plan.feasible),
+            point: candidate ? { name: candidate.name, zone: candidate.zone, east_m: candidate.east_m, north_m: candidate.north_m, resources: candidate.resources } : null,
+            point_reason: String(plan.point_reason || ''), probability_percent: plan.probability_percent,
+            duration_minutes: pending.outcome.duration, start_time: pending.outcome.startTime, end_time: pending.outcome.endTime,
+            random_draw_percent: pending.outcome.randomDraw, outcome: pending.outcome.resultText,
+            weather_start: pending.outcome.weatherStart, weather_end: pending.outcome.weatherEnd
+          },
+          body: pending.context.body,
+          scene_before_evidence: pending.outcome.scene,
+          island_agent_changes: pending.context.state_changes
+        };
+        const response = await requestCompletion(settings, [
+          { role: 'system', content: '你负责写一份简短、自然的中文事件记录。只输出 JSON 对象：human_summary、body_summary、before_scene、after_scene、island_summary，值均为字符串。必须按给定 event.outcome 和天气前后值写，不得改写结果或编造身体数值。身体部分只依据 body.parameter_changes 与求生者文字状态；有数值变化时保留其单位，没有则简洁描述文字状态。景象依据 scene_before_evidence 和研究者输入，写事件前与结束后两句；不推演过程中视野变化。岛屿变化以给定天气对照为准；若其他岛屿字段没有变化记录，就说明其他观测项基本不变。' },
+          { role: 'user', content: JSON.stringify(resultContext) }
+        ], null, null, 'event_report_summary');
+        pending.narrative = parseModelJson(response.content, '事件简报');
+      }
+
+      const planTitle = String(plan.event_title || pending.context.resource_intent?.name || '行动事件').slice(0, 60);
+      const report = {
+        round: pending.context.round, title: planTitle, point: candidate,
+        pointReason: String(plan.point_reason || ''),
+        resultText: `随机耗时 ${pending.outcome.duration} 分钟（${pending.outcome.startTime}—${pending.outcome.endTime}）。${pending.outcome.resultText}`,
+        probability: Number.isInteger(plan.probability_percent) ? plan.probability_percent : null,
+        durationMinutes: pending.outcome.duration,
+        humanSummary: String(pending.narrative.human_summary || plan.summary || ''),
+        bodySummary: String(pending.narrative.body_summary || ''), bodyChanges: pending.context.body.parameter_changes,
+        beforeScene: String(pending.narrative.before_scene || ''), afterScene: String(pending.narrative.after_scene || ''),
+        islandSummary: [
+          String(pending.narrative.island_summary || ''),
+          `行动时长 ${pending.outcome.duration} 分钟（${pending.outcome.startTime}—${pending.outcome.endTime}）；当地天气：${pending.outcome.weatherStart} → ${pending.outcome.weatherEnd}。`
+        ].filter(Boolean).join('\n')
+      };
+      active.eventReports.push(report);
+      if (candidate) active.eventMarkers.push({ ...candidate, title: report.title });
+      active.pendingEventReport = null;
+      renderEventReportPanel(active, `第 ${pending.context.round} 轮事件报告已完成。`);
+    } catch (error) {
+      pending.error = error.message || String(error);
+      renderEventReportPanel(active, `报告生成失败：${pending.error} · 本轮已提交，可稍后重试。`);
+    }
+  }
+
+  async function retryEventReport() {
+    if (busy || !interactionSession?.pendingEventReport) return;
+    let settings;
+    try { settings = getSettings(); }
+    catch (error) { renderEventReportPanel(interactionSession, '请先检查 API Key 和模型连接：' + error.message); return; }
+    setBusy(true);
+    renderEventReportPanel(interactionSession, '正在重试事件报告……');
+    await continueEventReport(settings, interactionSession);
+    setBusy(false);
+    updateFrameworkControls();
+    updateAgentInteractionControls();
+    renderEventReportPanel(interactionSession);
+  }
+
   function formatResponseLedger() {
     if (!roundResponseLedger.size) return '';
     return '\n\n本地已暂存的模型返回（逐次请求原文；续写已逐段追加）：\n' + [...roundResponseLedger.entries()].map(([systemId, records]) =>
@@ -1156,8 +1487,10 @@
         const frame = interactionFrame();
         interactionSession = {
           frame, frameworkAnchor: cloneJson(frame), frameworkCommandLog: [], round: 0,
-          previousRoundMessages: [], retryPrompt: null, retryRecipients: []
+          previousRoundMessages: [], retryPrompt: null, retryRecipients: [],
+          eventReports: [], eventMarkers: [], pendingEventReport: null
         };
+        clearEventReportPanel('新会话已开始，点位与报告已清空。');
         modelCalls = 0;
         agentToolDialogueTurns = 0;
         agentToolDialogueBySystem.clear();
@@ -1189,6 +1522,9 @@
     setAgentStatus('第 ' + roundNumber + ' 轮并行推理中', '');
     el('agentFailurePanel').hidden = true;
     try {
+      const beforeFrame = cloneJson(active.frame);
+      const worldSnapshot = cloneJson(G.IslandApp.getWorldState());
+      const mapPosition = G.IslandApp.getPosition();
       const inference = await R.forwardInference(
         active.frame,
         (messages, availableTools, choice, systemId) => requestCompletion(settings, messages, availableTools, choice, systemId),
@@ -1200,6 +1536,7 @@
           onToolTurn: systemId => recordAgentToolDialogueTurn(systemId)
         }
       );
+      const reportContext = buildEventReportContext(worldSnapshot, mapPosition, roundNumber, researcherPrompt, beforeFrame, inference);
       active.frame = inference.frame;
       active.round = roundNumber;
       lastAgentRoundNumber = roundNumber;
@@ -1211,6 +1548,10 @@
       }));
       active.frameworkCommandLog.push(...inference.commandLog.map(cloneJson));
       active.previousRoundMessages = messagesForNextRound(researcherPrompt, researcherRecipients, inference);
+      active.pendingEventReport = {
+        context: reportContext,
+        worldSnapshot, plan: null, outcome: null, narrative: null, error: ''
+      };
       active.retryPrompt = null;
       active.retryRecipients = [];
       appendAgentRound(roundNumber, researcherPrompt, inference);
@@ -1219,6 +1560,7 @@
       renderFramework();
       setAgentStatus('第 ' + roundNumber + ' 轮已提交 · 岛屿时钟未推进', 'ok');
       status('Agent 第 ' + roundNumber + ' 轮已完成。所有状态变化均限于所属 system，并记录了理由。', 'ok');
+      await continueEventReport(settings, active);
     } catch (error) {
       active.retryPrompt = researcherPrompt;
       active.retryRecipients = researcherRecipients;
@@ -1234,6 +1576,7 @@
       setBusy(false);
       updateFrameworkControls();
       updateAgentInteractionControls();
+      renderEventReportPanel(interactionSession);
     }
   }
 
@@ -1241,6 +1584,7 @@
     if (!interactionSession || busy) return;
     if (!confirm('结束并重置会话会清除本次 Agent 对话和状态修改；载入的原始 JSON 会保留。确定继续吗？')) return;
     interactionSession = null;
+    clearEventReportPanel('会话已重置，点位与事件报告已清空。');
     roundResponseLedger = new Map();
     agentToolDialogueTurns = 0;
     agentToolDialogueBySystem.clear();
@@ -1597,6 +1941,7 @@
   el('endExperiment').addEventListener('click', endExperiment);
   el('runAgentRound').addEventListener('click', () => runAgentInteractionRound(false));
   el('retryAgentRound').addEventListener('click', () => runAgentInteractionRound(true));
+  el('retryEventReport').addEventListener('click', retryEventReport);
   el('endAgentInteraction').addEventListener('click', endAgentInteraction);
   el('actionKind').addEventListener('change', updateActionFields);
   el('collectSite').addEventListener('change', () => refreshResourceOptions());

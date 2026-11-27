@@ -208,5 +208,44 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 .monitorStatementText{white-space:pre-wrap;max-height:180px;overflow:auto}
 .monitorRunError{margin-top:8px;border-left:3px solid #b96b5c;background:#fbefeb;color:#8f4438}
 .monitorEmptyCard{display:flex;align-items:center;min-height:120px;color:#748475;font-size:11px;line-height:1.7}
+.visibleConnection{margin:12px 0 14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--white);color:var(--ink)}
+.visibleConnectionRow{display:grid;grid-template-columns:minmax(240px,1.4fr) minmax(190px,1fr) auto;gap:12px;align-items:center}
+.visibleConnectionRow label{color:var(--ink);font-size:.9em}
+.visibleApiKey{display:flex;flex-direction:column;gap:5px;min-width:0;font-weight:700}
+.visibleApiKey input{width:100%;min-height:42px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface2);color:var(--ink);font:inherit}
+.visibleConnection .tongjiProviderLabel,.visibleConnection .rememberKeyLabel{align-self:center}
+.visibleConnection .tongjiProviderLabel span,.visibleConnection .rememberKeyLabel span{display:flex;align-items:center;gap:7px;white-space:nowrap;font-weight:600}
+.visibleConnection .tongjiProviderLabel input,.visibleConnection .rememberKeyLabel input{width:18px;height:18px;accent-color:var(--accent)}
+.visibleConnection .tongjiProviderLabel small{display:block;margin:3px 0 0 25px;color:var(--muted);font-size:.76em;line-height:1.4}
+.visibleConnection #providerStatus,.visibleConnection #aiStatus{margin:8px 0 0;color:var(--muted);font-size:.82em;line-height:1.55}
+.visibleConnection #providerStatus:empty,.visibleConnection #aiStatus:empty{display:none}
+.visibleConnection #aiStatus[data-kind="error"]{color:#c46d61}
+.visibleConnection #aiStatus[data-kind="ok"]{color:var(--accent)}
+.connectionHint{display:block;margin-top:8px;color:var(--muted);font-size:.75em;line-height:1.5}
+.observerContent .observerLayout{display:block;margin-top:10px}
+.eventWorkbench{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(340px,.92fr);gap:18px;align-items:stretch;margin:24px 0 10px}
+.eventMapPane,.eventReportPane{min-width:0}
+.eventMapPane>.panelHead,.eventReportPane>.panelHead{align-items:flex-start}
+.eventMapPane>.panelHead>div,.eventReportPane>.panelHead>div{display:block;min-width:0}
+.eventMapPane>.panelHead small,.eventReportPane>.panelHead small{display:block;margin-top:5px;color:var(--muted);font-size:.78em;line-height:1.5}
+#eventMapCount{white-space:nowrap;font-variant-numeric:tabular-nums}
+.eventMapPane .mapColumn{display:flex;flex-direction:column;gap:12px;padding:12px}
+.eventMapPane .mapPanel,.eventMapPane .localPanel{margin:0}
+.eventMapPane .mapPanel{border-radius:12px}
+.eventMapPane #map{height:clamp(440px,62vh,720px);max-height:none}
+.eventReportPane{display:flex;flex-direction:column}
+.eventReportPane>.panelHead>button{flex:0 0 auto}
+.eventReportStatus{padding:12px 16px;border-bottom:1px solid var(--line);color:var(--muted);font-size:.84em;line-height:1.55}
+.eventReportList{display:flex;flex-direction:column;gap:11px;padding:14px;min-height:420px}
+.eventReportEmpty{margin:auto;color:var(--muted);font-size:.9em;line-height:1.7;text-align:center}
+.eventReportCard{padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--surface2);color:var(--ink)}
+.eventReportCard h3{margin:0 0 9px;padding-bottom:8px;border-bottom:1px solid var(--line);font-size:1em;color:var(--ink)}
+.eventReportOutcome{margin:0 0 8px;padding:9px 10px;border-left:3px solid var(--accent);border-radius:5px;background:color-mix(in srgb,var(--surface2),var(--accent) 12%);color:var(--ink);font-weight:700;line-height:1.65;overflow-wrap:anywhere}
+.eventReportLocation{margin:0 0 10px;color:var(--muted);font-size:.8em;line-height:1.5;overflow-wrap:anywhere}
+.eventReportField{padding-top:9px;margin-top:8px;border-top:1px solid var(--line)}
+.eventReportField strong{display:block;margin-bottom:3px;color:var(--accent);font-size:.78em}
+.eventReportField p{margin:0;color:var(--ink);font-size:.88em;line-height:1.7;white-space:pre-line;overflow-wrap:anywhere}
+@media(max-width:1100px){.eventWorkbench{grid-template-columns:minmax(0,1fr)}.eventReportList{min-height:260px}.eventMapPane #map{height:clamp(380px,58vh,620px)}}
+@media(max-width:720px){.visibleConnection{padding:11px}.visibleConnectionRow{grid-template-columns:minmax(0,1fr);gap:9px}.visibleConnection .tongjiProviderLabel small{margin-left:25px}.eventWorkbench{gap:12px;margin-top:16px}.eventMapPane .mapColumn{padding:8px}.eventMapPane #map{height:420px}.eventReportList{padding:10px;min-height:220px}.eventReportCard{padding:11px}.eventMapPane>.panelHead,.eventReportPane>.panelHead{padding:12px}}
 @media(max-width:1050px){.monitorGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:650px){.monitorGrid{grid-template-columns:minmax(0,1fr);padding:9px}.monitorCard{padding:11px}.parameterMonitor>.panelHead{gap:8px;padding:13px}.monitorFieldRow{grid-template-columns:minmax(76px,.8fr) minmax(0,1.15fr) minmax(56px,.75fr);gap:5px}.monitorFieldList .monitorFieldRow{grid-template-columns:minmax(85px,.9fr) minmax(0,1.15fr) minmax(52px,.75fr)}#monitorUpdated{font-size:9px}}
