@@ -208,11 +208,11 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 .monitorStatementText{white-space:pre-wrap;max-height:180px;overflow:auto}
 .monitorRunError{margin-top:8px;border-left:3px solid #b96b5c;background:#fbefeb;color:#8f4438}
 .monitorEmptyCard{display:flex;align-items:center;min-height:120px;color:#748475;font-size:11px;line-height:1.7}
-.visibleConnection{margin:12px 0 14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--white);color:var(--ink)}
-.visibleConnection.aiSettings{padding:16px 18px}
-.connectionPanelHead h2{margin:0;color:var(--ink);font-size:1.15rem}
-.connectionPanelHead p{margin:4px 0 0;color:var(--muted);font-size:.84em;line-height:1.5}
-.visibleConnection .connectionGrid{display:grid;grid-template-columns:minmax(240px,1.35fr) minmax(170px,.8fr) minmax(200px,1fr) minmax(210px,1.1fr);grid-template-areas:"key key provider toggles" "model model manual manual" "base base actions actions";align-items:end;gap:12px;margin-top:14px}
+.visibleConnection{margin:9px 0 11px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--white);color:var(--ink)}
+.visibleConnection.aiSettings{padding:12px 14px}
+.connectionPanelHead h2{margin:0;color:var(--ink);font-size:1.08rem}
+.connectionPanelHead p{margin:2px 0 0;color:var(--muted);font-size:.82em;line-height:1.4}
+.visibleConnection .connectionGrid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));grid-template-areas:"key key key key provider provider toggles toggles" "model model manual manual base base actions actions";align-items:end;gap:8px 10px;margin-top:8px}
 .connectionGrid label{min-width:0;color:var(--ink)}
 .connectionGrid .visibleApiKey{grid-area:key}
 .connectionGrid .providerSelectLabel{grid-area:provider}
@@ -221,25 +221,27 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 .connectionGrid .modelNameLabel{grid-area:manual}
 .connectionGrid .baseUrlLabel{grid-area:base}
 .connectionGrid .connectionActions{grid-area:actions}
-.connectionGrid input,.connectionGrid select{width:100%;min-height:42px;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface2);color:var(--ink);font:inherit}
-.connectionToggles{display:flex;min-height:42px;flex-direction:column;justify-content:center;gap:7px}
-.visibleConnection .connectionToggles .tongjiProviderLabel,.visibleConnection .connectionToggles .rememberKeyLabel{align-self:flex-start}
+.connectionGrid input,.connectionGrid select{width:100%;min-height:36px;box-sizing:border-box;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:var(--surface2);color:var(--ink);font:inherit}
+.connectionToggles{display:flex;min-height:36px;flex-direction:row;align-items:center;flex-wrap:wrap;justify-content:flex-start;gap:4px 14px}
+.visibleConnection .connectionToggles .tongjiProviderLabel,.visibleConnection .connectionToggles .rememberKeyLabel{align-self:flex-start;flex:0 0 auto!important}
+.visibleConnection .connectionToggles .tongjiProviderLabel{flex:1 1 170px!important}
 .connectionGrid .tongjiProviderLabel small{margin-left:25px}
 .connectionActions{display:flex;align-items:flex-end;flex-wrap:wrap;gap:8px}
-.connectionActions>button,.connectionBalance>button{min-height:42px}
+.connectionActions>button,.connectionBalance>button{min-height:36px;padding:6px 10px}
 .connectionBalance{flex:1 1 125px;min-width:0}
 .connectionBalance p{margin:5px 0 0;color:var(--muted);font-size:.74em;line-height:1.4}
 .visibleApiKey{display:flex;flex-direction:column;gap:5px;min-width:0;font-weight:700}
-.visibleApiKey input{width:100%;min-height:42px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface2);color:var(--ink);font:inherit}
+.visibleApiKey input{width:100%;min-height:36px;padding:6px 10px;border:1px solid var(--line);border-radius:9px;background:var(--surface2);color:var(--ink);font:inherit}
 .visibleConnection .tongjiProviderLabel,.visibleConnection .rememberKeyLabel{align-self:center}
 .visibleConnection .tongjiProviderLabel span,.visibleConnection .rememberKeyLabel span{display:flex;align-items:center;gap:7px;white-space:nowrap;font-weight:600}
 .visibleConnection .tongjiProviderLabel input,.visibleConnection .rememberKeyLabel input{width:18px;height:18px;accent-color:var(--accent)}
 .visibleConnection .tongjiProviderLabel small{display:block;margin:3px 0 0 25px;color:var(--muted);font-size:.76em;line-height:1.4}
-.visibleConnection #providerStatus,.visibleConnection #aiStatus{margin:8px 0 0;color:var(--muted);font-size:.82em;line-height:1.55}
+.visibleConnection #providerStatus,.visibleConnection #aiStatus{margin:5px 0 0;color:var(--muted);font-size:.8em;line-height:1.4}
 .visibleConnection #providerStatus:empty,.visibleConnection #aiStatus:empty{display:none}
 .visibleConnection #aiStatus[data-kind="error"]{color:#c46d61}
 .visibleConnection #aiStatus[data-kind="ok"]{color:var(--accent)}
-.connectionHint{display:block;margin-top:8px;color:var(--muted);font-size:.75em;line-height:1.5}
+.visibleConnection .aiPrivacy{margin-top:5px;line-height:1.4}
+.connectionHint{display:block;margin-top:5px;color:var(--muted);font-size:.75em;line-height:1.4}
 .observerContent .observerLayout{display:block;margin-top:10px}
 .eventWorkbench{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(340px,.92fr);gap:18px;align-items:stretch;margin:24px 0 10px}
 .eventMapPane,.eventReportPane{min-width:0}
@@ -264,7 +266,7 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 .eventReportField strong{display:block;margin-bottom:3px;color:var(--accent);font-size:.78em}
 .eventReportField p{margin:0;color:var(--ink);font-size:.88em;line-height:1.7;white-space:pre-line;overflow-wrap:anywhere}
 @media(max-width:1100px){.eventWorkbench{grid-template-columns:minmax(0,1fr)}.eventReportList{min-height:260px}.eventMapPane #map{height:clamp(380px,58vh,620px)}}
-@media(max-width:1050px){.visibleConnection .connectionGrid{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"key key" "provider toggles" "model model" "manual manual" "base base" "actions actions"}}
+@media(max-width:1050px){.visibleConnection .connectionGrid{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-areas:"key key provider provider" "toggles toggles model model" "manual manual base base" "actions actions actions actions"}}
 @media(max-width:720px){.visibleConnection{padding:11px}.visibleConnection.aiSettings{padding:12px}.visibleConnection .connectionGrid{grid-template-columns:minmax(0,1fr);grid-template-areas:"key" "provider" "toggles" "model" "manual" "base" "actions";gap:10px}.connectionActions>*{flex:1 1 100%}.visibleConnection .tongjiProviderLabel small{margin-left:25px}.eventWorkbench{gap:12px;margin-top:16px}.eventMapPane .mapColumn{padding:8px}.eventMapPane #map{height:420px}.eventReportList{padding:10px;min-height:220px}.eventReportCard{padding:11px}.eventMapPane>.panelHead,.eventReportPane>.panelHead{padding:12px}}
 @media(max-width:1050px){.monitorGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:650px){.monitorGrid{grid-template-columns:minmax(0,1fr);padding:9px}.monitorCard{padding:11px}.parameterMonitor>.panelHead{gap:8px;padding:13px}.monitorFieldRow{grid-template-columns:minmax(76px,.8fr) minmax(0,1.15fr) minmax(56px,.75fr);gap:5px}.monitorFieldList .monitorFieldRow{grid-template-columns:minmax(85px,.9fr) minmax(0,1.15fr) minmax(52px,.75fr)}#monitorUpdated{font-size:9px}}
