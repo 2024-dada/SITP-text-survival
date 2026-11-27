@@ -32,7 +32,7 @@ section('1 东岸 (270,0)');
   ok(dir(o,'南').sea&&dir(o,'西').sea===null,'南向中心线被挡但左前方可见海域；西向没有海域线索');
   ok(dir(o,'南').edge===null&&dir(o,'南').block!==null&&dir(o,'西').block!==null,'南/西的正前方有地形或树冠遮挡');
   ok(dir(o,'南').trend.grade>0.05&&dir(o,'西').trend.grade>0.05,'南/西坡度为正（向内陆抬升）');
-  ok(/\d+米外是水边|水边就在/.test(card(o,'北').text),'北向给出岸线距离');
+  ok(/约\d+米(?:处|外)是水边|水边就在/.test(card(o,'北').text),'北向给出岸线距离');
 }
 
 /* 1b. 旧版北=东=南的岸边点 */
@@ -127,12 +127,13 @@ section('7 资源库存与线索');
   ok(/枯枝|倒木|枯木/.test(card(o,'脚下').text),'枯木点中心的脚下文字出现枯木线索');
   const site=s.sites.find(x=>x.id==='129'),pool=site.pools.find(a=>a.resource==='R05');
   const before=pool.amount;
+  const shellBefore=site.pools.find(a=>a.resource==='R06').amount;
   const east=at(s,[270,0]);
   const hadFish=/鱼影/.test(card(east,'北').text);
   pool.amount=0;
   const depleted=at(s,[270,0]);
   ok(!/鱼影/.test(card(depleted,'北').text),'R05 清零后北向不再出现鱼影');
-  ok(/贝类/.test(card(depleted,'北').text),'鱼库存清零不影响独立的贝类线索');
+  ok(/附着点|附着痕迹/.test(card(depleted,'北').text)&&site.pools.find(a=>a.resource==='R06').amount===shellBefore,'鱼库存清零不影响独立的贝类线索');
   pool.amount=before;
   const restored=at(s,[270,0]);
   ok(/鱼影/.test(card(restored,'北').text),'库存恢复后鱼影线索恢复');
@@ -160,17 +161,17 @@ section('7b 目标视线遮挡');
   }finally{M.terrain=oldTerrain;D.sites.forEach((site,i)=>{site.east_m=oldPoints[i][0];site.north_m=oldPoints[i][1];});}
 }
 
-/* 7c. 同日同资源的多个成熟事件合并，同时保留涉及资源点编号。 */
+/* 7c. 同日同资源的多个成熟个体合并到一条生态月报。 */
 section('7c 变化记录可读性');
 {
-  const s=fresh();s.hour=14.75;
+  const s=fresh();s.hour=710.75; // 下一刻跨入第30日，触发一次生态月报
   const pools=s.sites.filter(site=>site.pools.some(a=>a.resource==='R06'&&a.amount<a.capacity-1)).slice(0,2);
-  for(const site of pools){const a=site.pools.find(x=>x.resource==='R06');a.young=[[1,1]];}
+  for(const site of pools){const a=site.pools.find(x=>x.resource==='R06');a.young=[[30,1,0,0]];}
   M.tick(s,.25);
-  const records=s.log.filter(e=>e.text.includes('R06')&&e.text.includes('幼体成熟'));
+  const records=s.log.filter(e=>e.text.includes('普通小型海岸贝类生态月报')&&e.text.includes('成熟'));
   ok(pools.length===2,'准备了两个独立贝类资源点的成熟事件');
   ok(records.length===1,'同日同类成熟事件合并为一条记录');
-  if(records[0])ok(pools.every(site=>records[0].text.includes(site.id)),'合并记录保留涉及的资源点编号');
+  if(records[0])ok(records[0].text.includes('成熟 2 个'),'合并记录保留成熟个体总数');
 }
 
 /* 8. 东北斜角对象：进入相邻两张卡，不扩散到背向两张 */
@@ -203,12 +204,12 @@ section('10 天气收缩');
   ok(n.facts.reach===12,'夜间可辨上限12米');
   ok(['北','东','南','西'].every(x=>lines(card(n,x).text).length<=2),'夜间方向卡不超过2行');
   ok(!/鱼影|贝类/.test([card(n,'北').text,card(n,'东').text].join('')),'夜间不出现鱼贝细节');
-  let light=null;for(let h=0;h<24*30;h+=.25){const w=M.weather(h,42,[0,0]);if(w.rain>0&&w.rain<=5){light=h;break;}}
+  let light=null;for(let h=0;h<24*365;h+=.25){const w=M.weather(h,42,[0,0]);if(w.daylight&&w.rain>0&&w.rain<=5){light=h;break;}}
   s.hour=light;const l=at(s,[0,0]);
   ok(l.facts.reach===85,'细雨可辨上限85米');
   ok(l.background.includes('细雨'),'细雨写在公共背景');
   ok(['北','东','南','西'].every(x=>!card(l,x).text.includes('细雨')),'方向卡不重复“细雨”');
-  let heavy=null;for(let h=0;h<24*30;h+=.25){if(M.weather(h,42,[0,0]).rain>5){heavy=h;break;}}
+  let heavy=null;for(let h=0;h<24*365;h+=.25){const w=M.weather(h,42,[0,0]);if(w.daylight&&w.rain>5){heavy=h;break;}}
   s.hour=heavy;const hv=at(s,[0,0]);
   ok(hv.facts.reach===45,'强雨可辨上限45米');
   ok(['北','东','南','西'].every(x=>!card(hv,x).text.includes('没有看到岸线')),'强雨时不重复“没有岸线”长句');
@@ -218,7 +219,7 @@ section('10 天气收缩');
 section('11 局部雨带');
 {
   const s=fresh();let hour=null;
-  for(let h=0;h<24*20;h+=.25){const a=M.weather(h,42,[260,0]),b=M.weather(h,42,[-260,0]);if(a.rain>0&&b.rain===0&&a.daylight){hour=h;break;}}
+  for(let h=0;h<24*365;h+=.25){const a=M.weather(h,42,[260,0]),b=M.weather(h,42,[-260,0]);if(a.rain>0&&b.rain===0&&a.daylight){hour=h;break;}}
   ok(hour!==null,'找到东岸有雨、西岸无雨的时次');
   if(hour!==null){
     s.hour=hour;
@@ -238,7 +239,9 @@ section('12 稳定与存档');
   ok(before===JSON.stringify(s),'观察不改变世界状态');
   const saved=JSON.parse(JSON.stringify(s));M.validate(saved);
   ok(JSON.stringify(at(saved,p))===JSON.stringify(at(s,p)),'存档导出/载入后同点观察一致');
-  ok(saved.version==='observation-v3','v3存档格式继续可用，未因观测算法失效');
+  const legacy=JSON.parse(JSON.stringify(saved));legacy.version='observation-v3';delete legacy.ecology;
+  M.validate(legacy);
+  ok(legacy.version==='observation-v4'&&Boolean(legacy.ecology),'v3存档迁移到当前格式并继续可用');
 }
 
 /* 13. 无无控制随机 */

@@ -174,7 +174,8 @@
     const pending = active && interactionSession.retryPrompt !== null;
     const showRetry = pending && !busy;
     const loaded = Boolean(selectedFramework && selectedFrameworkFile !== '未载入岛屿 JSON' && selectedFrameworkFile !== '内置框架');
-    el('runAgentRound').disabled = busy || Boolean(session) || (!active && !loaded) || pending;
+    el('runAgentRound').disabled = busy || Boolean(session) || (!active && !loaded) || pending || Boolean(interactionSession?.pendingEventReport);
+    el('runAgentRound').title = interactionSession?.pendingEventReport ? '请先重试完成本轮报告与结算' : '';
     el('runAgentRound').textContent = active ? '运行第 ' + (interactionSession.round + 1) + ' 轮' : '运行第一轮';
     el('retryAgentRound').hidden = !showRetry;
     el('retryAgentRound').disabled = busy;
@@ -282,9 +283,15 @@
   }
 
   function recordAgentResponse(systemId, content, finishReason, segmentType) {
-    if (!roundActive || !systemId || typeof content !== 'string') return;
+    const reportRetry = /^event_/.test(systemId || '') && Boolean(interactionSession?.pendingEventReport);
+    if ((!roundActive && !reportRetry) || !systemId || typeof content !== 'string') return;
     if (!roundResponseLedger.has(systemId)) roundResponseLedger.set(systemId, []);
     roundResponseLedger.get(systemId).push({ content, finishReason: finishReason || '', segmentType: segmentType || '回复' });
+    const pendingRound = interactionSession?.pendingEventReport?.context.round;
+    if (pendingRound) {
+      const archivedRound = interactionSession.archiveRounds.find(item => item.round === pendingRound);
+      if (archivedRound) archivedRound.model_responses = cloneJson([...roundResponseLedger.entries()]);
+    }
   }
 
   function updateAgentToolDialogueCounter() {
@@ -343,6 +350,8 @@
   }
 
   async function requestCompletion(settings, messages, tools, choice, systemId) {
+    const isReport = /^event_/.test(systemId || '');
+    if (isReport) messages = messages.concat({ role: 'user', content: '这是程序读取的 JSON。只返回紧凑完整 JSON，不输出思考过程、Markdown或重复说明。每个结果/依据字符串最多35字，概要最多120字；保留要求的全部时段。' });
     const contextExcerpt = responseContextExcerpt(messages);
     const responseSegments = [];
     let continuationCount = 0;
@@ -430,7 +439,19 @@
         if (current.message.tool_calls && current.message.tool_calls.length) {
           throw new Error('模型续写时返回了工具调用，无法安全拼接文本；已保留此前生成的分段。请缩短本轮任务后重试。');
         }
-        if (!next || !next.trim()) throw new Error('模型续写请求没有返回文本；此前已生成内容已保存在本轮失败记录中。');
+        if (!next || !next.trim()) {
+          if (isReport) {
+            const recovered = await send(messages.concat({ role: 'user', content: '上次 JSON 被截断且续写为空。请重新返回完整的紧凑 JSON，缩短各字段文字，不省略字段。' }), null, null, MAX_COMPLETION_TOKENS);
+            const recoveredText = typeof recovered.message.content === 'string' ? recovered.message.content : '';
+            recordAgentResponse(systemId, recoveredText, recovered.finishReason, '报告紧凑重建');
+            if (recoveredText.trim() && recovered.finishReason !== 'length') {
+              parseModelJson(recoveredText, '重建报告');
+              recovered.message._responseSegments = [recoveredText];
+              return recovered.message;
+            }
+          }
+          throw new Error('模型续写没有返回可用文本；原始响应已保留，可重试报告。');
+        }
       }
       current.message.content = accumulated;
       current.message._responseSegments = responseSegments.slice();
@@ -1341,9 +1362,12 @@
           }
         } else {
           try {
+            const existingItem = inventory[step.resource_id];
+            if (existingItem && (existingItem.unit !== resource.unit || !Number.isFinite(existingItem.amount) || existingItem.amount < 0)) {
+              throw new Error('本次物品单位或数量与已有背包记录不一致');
+            }
             const amount = M.harvest(world, candidate.siteId, step.resource_id, '求生者');
-            const item = inventory[step.resource_id] || (inventory[step.resource_id] = { amount: 0, unit: resource.unit, name: resource.name });
-            if (item.unit !== resource.unit) throw new Error('本次物品单位与已有背包记录不一致');
+            const item = existingItem || (inventory[step.resource_id] = { amount: 0, unit: resource.unit, name: resource.name });
             item.amount = Number((item.amount + amount).toFixed(3));
             item.name = resource.name;
             collectedTotal += amount;
@@ -1590,8 +1614,13 @@
       reportField(card, '岛屿变化', report.islandSummary);
       list.append(card);
     }
-    if (active?.eventMarkers) G.IslandApp?.setEventMarkers(active.eventMarkers);
-    el('eventMapCount').textContent = `${active?.eventMarkers?.length || 0} 个点位`;
+    const previewMarkers = (active?.pendingEventReport?.plan?.steps || []).flatMap(step => {
+      const point = active.pendingEventReport.context.event_candidates.find(candidate => candidate.id === step.point_id);
+      return point ? [{ ...point, title: `待结算 · ${step.time_label} ${step.activity}` }] : [];
+    });
+    const markers = [...(active?.eventMarkers || []), ...previewMarkers];
+    G.IslandApp?.setEventMarkers(markers);
+    el('eventMapCount').textContent = `${markers.length} 个点位${previewMarkers.length ? '（含待结算）' : ''}`;
     el('eventReportStatus').textContent = statusText || (active?.pendingEventReport?.error
       ? '报告或状态结算失败：' + active.pendingEventReport.error + ' · 可重试完成本轮结算。'
       : reports.length ? `已整理 ${reports.length} 轮事件记录。` : '完成一轮推理后，这里会生成简要事件报告。');
@@ -1637,10 +1666,33 @@
           if (step.point_id !== null && step.point_id !== undefined && !candidates.has(step.point_id)) throw new Error(`第 ${index + 1} 个行动时段引用了地图候选列表外的点位。`);
           if (step.resource_id !== null && step.resource_id !== undefined && typeof step.resource_id !== 'string') throw new Error(`第 ${index + 1} 个行动时段的资源标识无效。`);
         }
+        for (const [index, step] of plan.steps.entries()) {
+          const requested = step.point_id ? candidates.get(step.point_id) : null;
+          let suitable = [...candidates.values()].filter(candidate => {
+            if (candidate.id === 'observer') return false;
+            if (step.resource_id) return candidate.resources.some(resource => resource.resource === step.resource_id);
+            return requested && candidate.zone === requested.zone;
+          });
+          if (suitable.length) {
+            suitable.sort((a, b) => a.distance_m - b.distance_m);
+            suitable = suitable.slice(0, 6);
+            const draw = M.rnd(pending.context.world.seed, `point:${pending.context.round}:${index}:${step.activity}`);
+            const selected = suitable[Math.floor(draw * suitable.length)];
+            step.point_id = selected.id;
+            step.point_reason = `${step.point_reason || ''} 按实验种子从同资源或同区域的近邻候选中抽取 ${selected.id}。`;
+          } else if (!step.point_id) step.point_id = 'observer';
+        }
         pending.plan = plan;
       }
 
       const plan = pending.plan;
+      // A planned location is a preview, not a committed resource change.
+      const previews = plan.steps.flatMap(step => {
+        const point = pending.context.event_candidates.find(candidate => candidate.id === step.point_id);
+        return point ? [{ ...point, title: `待结算 · ${step.time_label} ${step.activity}` }] : [];
+      });
+      G.IslandApp?.setEventMarkers([...active.eventMarkers, ...previews]);
+      el('eventMapCount').textContent = `${active.eventMarkers.length + previews.length} 个点位（含待结算）`;
       const settlement = plan.steps.length ? prepareTimelineSettlement(active, pending) : null;
       const noActivitySettlement = '本轮没有安排行动时段；已整理研究者输入与 Agent 推理，岛屿时间和资源未变化。';
 
@@ -1691,6 +1743,7 @@
         settlementSummary: settlement?.summary || noActivitySettlement
       };
       if (settlement && !settlement.committed) {
+        const settlementMessage = parameterizedSettlementMessage(settlement, pending);
         G.IslandApp.setWorldState(settlement.world, settlement.position);
         settlement.committed = true;
         active.frame = settlement.frame;
@@ -1698,7 +1751,7 @@
         active.inventory = settlement.inventory;
         active.previousRoundMessages = [
           ...active.previousRoundMessages,
-          { kind: 'settlement_parameters', sender: '岛屿状态参数', text: parameterizedSettlementMessage(settlement, pending) }
+          { kind: 'settlement_parameters', sender: '岛屿状态参数', text: settlementMessage }
         ];
       }
       if (settlement && !settlement.reportAdded) {
@@ -1752,7 +1805,7 @@
   }
 
   async function runAgentInteractionRound(retry) {
-    if (busy || session) return;
+    if (busy || session || interactionSession?.pendingEventReport) return;
     let settings;
     try { settings = getSettings(); }
     catch (error) { status(error.message, 'error'); setAgentStatus('先检查模型连接设置', 'error'); return; }
@@ -2243,14 +2296,20 @@
     if (!interactionSession) return null;
     const active = interactionSession;
     const archive = {
+      parameter_units: Object.fromEntries([...new Set([active.frameworkAnchor, active.frame, ...active.archiveRounds.flatMap(round => [round.frame_before, round.frame_after_agent])].flatMap(frame => frame.systems.flatMap(system => system.parameters.map(parameter => parameter.param))))].map(code => [code, G.SITPParameterUnits.get(code)])),
       initial: active.frameworkAnchor,
       rounds: active.archiveRounds,
       reports: active.eventReports,
       current: { frame: active.frame, world: G.IslandApp.getWorldState(), inventory: active.inventory, commands: active.frameworkCommandLog, pending_report: active.pendingEventReport, failed_responses: active.retryPrompt !== null ? [...roundResponseLedger.entries()] : [] }
     };
     const key = el('aiApiKey').value.trim();
-    const serialized = JSON.stringify(archive, (name, value) => /api.?key|secret|password|credential/i.test(name) ? '[已隐藏]' : value);
-    return JSON.parse(key ? serialized.split(key).join('[已隐藏]') : serialized);
+    function redact(value, name = '') {
+      if (/api.?key|secret|password|credential/i.test(name)) return '[已隐藏]';
+      if (Array.isArray(value)) return value.map(item => redact(item));
+      if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([childName, child]) => [childName, redact(child, childName)]));
+      return typeof value === 'string' && key ? value.split(key).join('[已隐藏]') : value;
+    }
+    return redact(archive);
   }
   G.SurvivalAgent = Object.freeze({ refreshAfterIslandRender, getMonitorSnapshot, getExperimentArchive });
   new MutationObserver(refreshAfterIslandRender).observe(el('nearby'), { childList: true });

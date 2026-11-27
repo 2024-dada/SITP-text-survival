@@ -44,6 +44,8 @@
     status.textContent = `${document.getElementById('agentRoundCount').textContent} 轮已提交 · ${runStatus.textContent} · 刷新或重置前请导出`;
   };
   new MutationObserver(exportStatus).observe(runStatus, { childList: true, characterData: true, subtree: true });
+  new MutationObserver(exportStatus).observe(document.getElementById('runAgentRound'), { attributes: true, attributeFilter: ['disabled'] });
+  new MutationObserver(exportStatus).observe(document.getElementById('endAgentInteraction'), { attributes: true, attributeFilter: ['disabled'] });
   button.addEventListener('click', () => {
     const data = globalThis.SurvivalAgent.getExperimentArchive();
     if (!data) { status.textContent = '请先开始一次实验会话。'; return; }
@@ -63,6 +65,7 @@
       h.textContent = title; pre.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2); block.append(h, pre); doc.body.append(block);
     }
     section('实验初始状态', data.initial);
+    section('参数单位对照', data.parameter_units);
     for (const round of data.rounds) section(`第 ${round.round} 轮 · 输入、推理、参数与工具记录`, round);
     section('全部事件报告与状态结算', data.reports);
     section('当前状态与完整命令记录', data.current);

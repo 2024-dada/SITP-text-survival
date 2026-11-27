@@ -87,6 +87,20 @@
   function parameterUnit(code) {
     const key = String(code).toLowerCase();
     if (exactUnits[key]) return exactUnits[key];
+    // Generated simulation parameters may append estimate/phase suffixes.
+    const normalized = key.replace(/_(?:est|estimated|estimate|before|after|initial|final|current|total)$/g, '');
+    if (normalized !== key) return parameterUnit(normalized);
+    if (/(?:^|_)hook_(?:count|units|qty|quantity)$/.test(key)) return '个（鱼钩，推定）';
+    if (/(?:^|_)bait_(?:count|units|qty|quantity)$/.test(key)) return '份（鱼饵，推定）';
+    if (/_kg$/.test(key)) return '千克';
+    if (/_kcal$/.test(key)) return '千卡';
+    if (/_kj$/.test(key)) return '千焦';
+    if (/_ml$/.test(key)) return '毫升';
+    if (/_cm$/.test(key)) return '厘米';
+    if (/_mm(?:_|$)/.test(key) && !/_mm_h|_per_/.test(key)) return '毫米';
+    if (/_percent$|_pct$/.test(key)) return '%';
+    if (/_seconds?$|_sec$/.test(key)) return '秒';
+    if (/_count$|_qty$|_quantity$|_units$/.test(key)) return '个（按对象计数，推定）';
     if (key === 'epoch_year') return '年';
     if (key === 'epoch_month') return '月';
     if (key === 'epoch_day') return '日';
@@ -126,9 +140,7 @@
     if (/_seed$/.test(key)) return '编号（随机种子）';
     if (/_rows$/.test(key)) return '行';
     if (/_vertices$|_points$|_cells$|_sites$|_zones$|_habitats$|_groups$|_types$/.test(key)) return '个（数量）';
-    // Unknown numeric fields from user-loaded frameworks still get an explicit
-    // dimensionless unit instead of silently showing a blank unit.
-    return '1（无量纲，未识别字段的暂定推定）';
+    return '1（归一化指标，暂定推定）';
   }
 
   function element(tag, className, text) {
