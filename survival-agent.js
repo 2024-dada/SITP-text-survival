@@ -1153,6 +1153,10 @@
     const sites = M.D.sites.map(site => {
       const point = [site.east_m, site.north_m];
       if (!M.inside(point)) return null;
+      if (intent && ['R05', 'R06', 'R07'].includes(intent.resourceId)) {
+        const localWeather = M.weather(world.hour, world.seed, point);
+        if (!localWeather.daylight || localWeather.tide > 0) return null;
+      }
       const current = currentSites.get(site.id);
       const pools = (current ? current.pools : site.stocks.map(stock => ({ ...stock, amount: stock.initial })))
         .filter(pool => Number.isFinite(pool.amount) && pool.amount > 0)
@@ -1188,7 +1192,7 @@
     }));
   }
 
-  function buildEventReportContext(world, position, roundNumber, researcherPrompt, beforeFrame, inference) {
+  function buildEventReportContext(world, position, roundNumber, researcherPrompt, beforeFrame, inference, inventory = {}) {
     const actionText = [researcherPrompt, ...inference.results.map(result => result.finalText || '')].filter(Boolean).join('\n').slice(0, 7000);
     const candidates = eventCandidates(world, position, actionText);
     const weather = M.weather(world.hour, world.seed, position);
@@ -1214,9 +1218,14 @@
       } },
       event_candidates: candidates.sites,
       resource_intent: candidates.intent,
+      carried_items: Object.entries(inventory).map(([resource, item]) => ({ resource, ...item })),
       current_scene: observation?.valid ? String(observation.role || '').slice(0, 2200) : '',
       body: {
         before_statement: String(bodyBefore?.statement || ''), after_statement: String(bodyAfter?.statement || ''),
+        current_parameters: (bodyAfter?.parameters || []).filter(parameter => !/api[-_]?key|token|secret|password|credential/i.test(parameter.param)).map(parameter => ({
+          code: parameter.param, value: parameter.value,
+          unit: G.SITPParameterUnits?.get(parameter.param) || '1（无量纲，未识别字段的暂定推定）'
+        })),
         parameter_changes: changedBodyParameters(beforeFrame, inference.frame)
       },
       agent_outputs: statements,
@@ -1234,6 +1243,108 @@
 
   function seededInteger(seed, key, min, max) {
     return min + Math.floor(M.rnd(seed, key) * (max - min + 1));
+  }
+
+  function seededDuration(seed, key, minMinutes, maxMinutes) {
+    const firstStep = Math.ceil(minMinutes / 15);
+    const lastStep = Math.floor(maxMinutes / 15);
+    if (lastStep < firstStep) throw new Error('行动时长范围内没有可结算的15分钟时间步。');
+    return seededInteger(seed, key, firstStep, lastStep) * 15;
+  }
+
+  function formatQuantity(value) {
+    return String(Number(Number(value).toFixed(3)));
+  }
+
+  function carriedItemsText(inventory) {
+    const items = Object.values(inventory || {}).filter(item => Number(item.amount) > 0);
+    return items.length
+      ? items.map(item => `${item.name} ${formatQuantity(item.amount)} ${item.unit}`).join('、')
+      : '无';
+  }
+
+  function prepareEventSettlement(active, pending, candidate) {
+    if (pending.settlement) return pending.settlement;
+    const world = cloneJson(pending.worldSnapshot);
+    const inventory = cloneJson(active.inventory || {});
+    const intent = pending.context.resource_intent;
+    const position = candidate?.siteId
+      ? [candidate.east_m, candidate.north_m]
+      : pending.context.world.selected_position_m.slice();
+    let collected = null;
+
+    if (intent && pending.outcome.success === true) {
+      const resource = candidate?.resources.find(item => item.resource === intent.resourceId);
+      if (!candidate?.siteId || !resource) throw new Error('成功结果没有对应的可结算资源点，状态未提交。');
+      const amount = M.harvest(world, candidate.siteId, intent.resourceId, '求生者');
+      const item = inventory[intent.resourceId] || (inventory[intent.resourceId] = {
+        amount: 0, unit: resource.unit, name: resource.name
+      });
+      if (item.unit !== resource.unit) throw new Error('本次物品单位与已有背包记录不一致，状态未提交。');
+      item.amount = Number((item.amount + amount).toFixed(3));
+      item.name = resource.name;
+      collected = { resource: intent.resourceId, name: resource.name, amount, unit: resource.unit };
+    }
+
+    M.tick(world, pending.outcome.duration / 60);
+    world.selected = position.slice();
+    M.validate(world);
+    const startTime = worldTimeText(M.weather(pending.worldSnapshot.hour, world.seed, position).date);
+    const endTime = worldTimeText(M.weather(world.hour, world.seed, position).date);
+    const itemChange = collected
+      ? `物品变化：${collected.name} +${formatQuantity(collected.amount)} ${collected.unit}，已加入本次会话随身物品；未直接摄入。`
+      : intent
+        ? `物品变化：本次未获得${M.D.pools[intent.resourceId]?.name || intent.name}，随身物品不变。`
+        : '物品变化：本轮没有可按岛屿规则结算的资源采集。';
+    const summary = `${itemChange} 岛屿时钟推进 ${pending.outcome.duration} 分钟（${startTime}—${endTime}）。当前位置：${candidate?.name || '原观察位置'}。本次会话随身物品：${carriedItemsText(inventory)}。`;
+    pending.settlement = {
+      world, inventory, position, collected, summary, frame: null, commands: [],
+      committed: false, reportAdded: false, markerAdded: false
+    };
+    return pending.settlement;
+  }
+
+  function prepareEventFrameworkSettlement(active, pending) {
+    const settlement = pending.settlement;
+    if (settlement.frame) return settlement;
+    const frame = cloneJson(active.frame);
+    const commands = [];
+    applyFrameworkCommand(frame, commands, {
+      type: 'set_framework_parameter', name: 'time_delta', value: pending.outcome.duration,
+      reason: '可执行事件结算采用的模拟时长，单位为分钟。'
+    });
+    for (const system of frame.systems) {
+      if (!Number.isFinite(system.time_clock)) throw new Error('Agent time_clock 不是有限数值，不能结算模拟时间。');
+      applyFrameworkCommand(frame, commands, {
+        type: 'set_time_clock', system_id: system.system_id,
+        value: system.time_clock + pending.outcome.duration,
+        reason: '随本轮岛屿事件结算同步累计模拟时间。'
+      });
+    }
+    R.validate(frame);
+    settlement.frame = frame;
+    settlement.commands = commands;
+    return settlement;
+  }
+
+  async function generateBodySummary(settings, pending, eventStatus) {
+    if (pending.bodySummary) return pending.bodySummary;
+    const context = {
+      round: pending.context.round,
+      researcher_prompt: pending.context.researcher_prompt,
+      body: pending.context.body,
+      survivor_agent_output: pending.context.agent_outputs.find(agent => agent.agent === '求生者 Agent') || null,
+      event_status: eventStatus || '本轮没有确认具体行动事件。'
+    };
+    const response = await requestCompletion(settings, [
+      { role: 'system', content: '你负责根据人体 Agent 的本轮框架状态，整理一段供研究者阅读的中文身体感受报告。只输出 JSON 对象：{"body_summary":"..."}。用第一人称、日常语言，简短说明当前参数和本轮变化代表什么感受；先参考参数的代码名、数值、单位、前后变化及 Agent 原 statement。字段含义不明确时不要猜，不编造任何数值或医学结论。若本轮没有具体行动、参数变化或可解释的身体状态，就自然说明本轮没有新的身体变化记录。不要把未进食的物品写成已摄入。控制在120字以内。该文字只展示在事件报告中，不写入 Agent 状态、对话历史或下一轮输入。' },
+      { role: 'user', content: JSON.stringify(context) }
+    ], null, null, 'event_body_summary');
+    const parsed = parseModelJson(response.content, '人体感受报告');
+    const summary = String(parsed.body_summary || '').trim().slice(0, 120);
+    if (!summary) throw new Error('事件报告没有返回有效的人体感受，请重试报告。');
+    pending.bodySummary = summary;
+    return summary;
   }
 
   function worldTimeText(date) {
@@ -1257,7 +1368,11 @@
         resultText: `AI推算成功概率 ${plan.probability_percent}%；本次抽样值 ${randomDraw.toFixed(2)}%：${String(outcome).trim()}`
       };
     }
-    return { randomDraw: null, success: null, resultText: String(plan.deterministic_result).trim() };
+    return {
+      randomDraw: null,
+      success: typeof plan.deterministic_success === 'boolean' ? plan.deterministic_success : null,
+      resultText: String(plan.deterministic_result).trim()
+    };
   }
 
   function reportField(parent, label, value) {
@@ -1273,12 +1388,12 @@
   }
 
   function reportBodyChanges(report) {
-    if (!report.bodyChanges.length) return report.bodySummary;
+    if (!report.bodyChanges.length) return '';
     const changes = report.bodyChanges.map(change => {
       const before = change.before === null ? '新增' : `${change.before} ${change.unit} → `;
       return `${change.code}：${before}${change.after} ${change.unit}`;
     }).join('；');
-    return [report.bodySummary, '数值变化：' + changes].filter(Boolean).join('\n');
+    return changes;
   }
 
   function renderEventReportPanel(active, statusText) {
@@ -1308,7 +1423,9 @@
       }
       reportField(card, '点位依据', report.pointReason);
       reportField(card, '事件概要', report.humanSummary);
-      reportField(card, '人体指标与感受', reportBodyChanges(report));
+      reportField(card, '人体 Agent 感受', report.bodySummary);
+      reportField(card, '人体框架参数变化', reportBodyChanges(report));
+      reportField(card, '本轮状态结算', report.settlementSummary);
       reportField(card, '事件前看到的景象', report.beforeScene);
       reportField(card, '事件后看到的景象', report.afterScene);
       reportField(card, '岛屿变化', report.islandSummary);
@@ -1317,7 +1434,7 @@
     if (active?.eventMarkers) G.IslandApp?.setEventMarkers(active.eventMarkers);
     el('eventMapCount').textContent = `${active?.eventMarkers?.length || 0} 个点位`;
     el('eventReportStatus').textContent = statusText || (active?.pendingEventReport?.error
-      ? '报告生成失败：' + active.pendingEventReport.error + ' · 本轮已提交，可重试报告。'
+      ? '报告或状态结算失败：' + active.pendingEventReport.error + ' · 可重试完成本轮结算。'
       : reports.length ? `已整理 ${reports.length} 轮事件记录。` : '完成一轮推理后，这里会生成简要事件报告。');
     el('retryEventReport').hidden = !(active?.pendingEventReport && !busy);
   }
@@ -1341,7 +1458,7 @@
     try {
       if (!pending.plan) {
         const response = await requestCompletion(settings, [
-          { role: 'system', content: '你负责根据研究者本轮任务、Agent推理、地图点位、资源、天气和状态变化，判断具体事件及可执行位置。只输出一个 JSON 对象，不要 markdown。字段：has_event(boolean), event_title(string), feasible(boolean), point_id(string或null), probability_percent(integer 0..100或null), duration_min_minutes(integer), duration_max_minutes(integer), success_result(string), failure_result(string), deterministic_result(string), point_reason(string), summary(string)。point_id 必须来自 event_candidates；候选列表为空或没有匹配资源时 feasible=false 且 point_id=null。没有具体行动/事件时 has_event=false。对任何结果存在不确定性的事件或行动，都依据已提供的资源、位置、天气、Agent推理和研究者输入给出0至100的整数推算概率，并分别写出简短的成功与未成功结果；结果内容要符合事件，不编造地图数据未提供支持的具体数值。只有结果确定的事件才将概率设为null，并填写deterministic_result。不要限定某类事件才允许概率，也不要决定抽样结果。对可执行事件给出合理持续时间范围，单位为分钟，最短1、最长1440，min不得大于max；持续时间应符合当前事件，不使用固定通用范围。概率是基于本轮上下文的推算，不要称作实测统计率。' },
+          { role: 'system', content: '你负责根据研究者本轮任务、Agent推理、地图点位、资源、天气和状态变化，判断具体事件及可执行位置。只输出一个 JSON 对象，不要 markdown。字段：has_event(boolean), event_title(string), feasible(boolean), point_id(string或null), probability_percent(integer 0..100或null), duration_min_minutes(integer), duration_max_minutes(integer), success_result(string), failure_result(string), deterministic_result(string), deterministic_success(boolean或null), point_reason(string), summary(string)。point_id 必须来自 event_candidates；候选列表为空或没有匹配资源时 feasible=false 且 point_id=null。没有具体行动/事件时 has_event=false。对任何结果存在不确定性的事件或行动，都依据已提供的资源、位置、天气、Agent推理和研究者输入给出0至100的整数推算概率，并分别写出简短的成功与未成功结果；结果内容要符合事件，不编造地图数据未提供支持的具体数值。只有结果确定的事件才将概率设为null，并填写deterministic_result。若 resource_intent 指向资源采集，确定性结果还必须用 deterministic_success 明确说明是否真的采到资源。不要限定某类事件才允许概率，也不要决定抽样结果。可执行事件的时长范围单位为分钟，最短15、最长1440；范围两端必须是15的整数倍，min不得大于max。时长应符合当前事件，不使用固定通用范围；网页会在给定范围内按岛屿规则选择一个时长并结算。概率是基于本轮上下文的推算，不要称作实测统计率。' },
           { role: 'user', content: JSON.stringify(pending.context) }
         ], null, null, 'event_report_plan');
         const plan = parseModelJson(response.content, '点位判断');
@@ -1351,27 +1468,35 @@
           const chosen = pending.context.event_candidates.find(candidate => candidate.id === plan.point_id);
           if (!chosen) throw new Error('AI 返回的点位不在地图候选列表中，请重试报告。');
           if (plan.probability_percent !== null && (!Number.isInteger(plan.probability_percent) || plan.probability_percent < 0 || plan.probability_percent > 100)) throw new Error('事件报告概率必须为0至100的整数或null，请重试报告。');
-          if (!Number.isInteger(plan.duration_min_minutes) || !Number.isInteger(plan.duration_max_minutes) || plan.duration_min_minutes < 1 || plan.duration_max_minutes > 1440 || plan.duration_min_minutes > plan.duration_max_minutes) throw new Error('事件报告耗时范围无效，需为1至1440分钟内的整数范围，请重试报告。');
+          if (!Number.isInteger(plan.duration_min_minutes) || !Number.isInteger(plan.duration_max_minutes) || plan.duration_min_minutes < 15 || plan.duration_max_minutes > 1440 || plan.duration_min_minutes % 15 || plan.duration_max_minutes % 15 || plan.duration_min_minutes > plan.duration_max_minutes) throw new Error('事件报告耗时范围无效，需为15至1440分钟内、以15分钟为步长的范围，请重试报告。');
           if (Number.isInteger(plan.probability_percent)) {
             if (!String(plan.success_result || '').trim() || !String(plan.failure_result || '').trim()) throw new Error('事件报告缺少成功或未成功结果描述，请重试报告。');
           } else if (!String(plan.deterministic_result || '').trim()) throw new Error('确定性事件报告缺少结果描述，请重试报告。');
+          if (pending.context.resource_intent && plan.probability_percent === null && typeof plan.deterministic_success !== 'boolean') throw new Error('确定性资源采集结果缺少成功状态，请重试报告。');
         }
         pending.plan = plan;
       }
 
       const plan = pending.plan;
       if (!plan.has_event) {
+        const bodySummary = await generateBodySummary(settings, pending, '本轮没有确认具体行动事件，没有行动耗时与资源变化。');
+        const settlementSummary = '本轮没有开始岛上行动；事件报告已按人体 Agent 本轮参数整理感受，不改写 Agent 状态。岛屿时间和资源未变化。';
         active.eventReports.push({
           round: pending.context.round, title: '本轮讨论', resultText: '本轮没有确认具体行动事件。',
           point: null, pointReason: '', humanSummary: String(plan.summary || '继续输入明确行动后，地图将标注对应点位。'),
-          bodySummary: '', bodyChanges: [], beforeScene: '', afterScene: '', islandSummary: ''
+          bodySummary, bodyChanges: pending.context.body.parameter_changes, beforeScene: '', afterScene: '',
+          islandSummary: settlementSummary, settlementSummary
         });
         active.pendingEventReport = null;
+        renderFramework();
+        setAgentStatus(`第 ${pending.context.round} 轮报告已整理 · 本轮无事件`, 'ok');
         renderEventReportPanel(active, `第 ${pending.context.round} 轮已整理；未形成具体行动点位。`);
         return;
       }
 
       if (!plan.feasible) {
+        const bodySummary = await generateBodySummary(settings, pending, '本轮计划的行动未能开始，没有产生行动耗时或资源变化。');
+        const settlementSummary = '行动未开始；事件报告已按人体 Agent 本轮参数整理感受，不改写 Agent 状态。岛屿时间和资源未变化。';
         active.eventReports.push({
           round: pending.context.round,
           title: String(plan.event_title || pending.context.resource_intent?.name || '行动事件').slice(0, 60),
@@ -1379,19 +1504,21 @@
           point: null,
           pointReason: String(plan.point_reason || plan.summary || '现有地图与资源数据不足以确认可执行位置。'),
           humanSummary: String(plan.summary || '当前地图与资源记录未能支持这项行动。'),
-          bodySummary: '本轮未开始行动。',
+          bodySummary,
           bodyChanges: pending.context.body.parameter_changes,
           beforeScene: '', afterScene: '',
-          islandSummary: '未开始行动，未计算行动时段内的岛屿天气变化。'
+          islandSummary: '未开始行动，未计算行动时段内的岛屿天气变化。', settlementSummary
         });
         active.pendingEventReport = null;
+        renderFramework();
+        setAgentStatus(`第 ${pending.context.round} 轮报告已整理 · 行动未开始`, 'ok');
         renderEventReportPanel(active, `第 ${pending.context.round} 轮未确认可执行点位。`);
         return;
       }
 
       const candidate = plan.feasible ? pending.context.event_candidates.find(item => item.id === plan.point_id) : null;
       if (!pending.outcome) {
-        const duration = seededInteger(pending.context.world.seed, `duration:${pending.context.round}:${plan.event_title}:${candidate.id}`, plan.duration_min_minutes, plan.duration_max_minutes);
+        const duration = seededDuration(pending.context.world.seed, `duration:${pending.context.round}:${plan.event_title}:${candidate.id}`, plan.duration_min_minutes, plan.duration_max_minutes);
         const point = candidate ? [candidate.east_m, candidate.north_m] : pending.context.world.selected_position_m;
         const weatherStart = M.weather(pending.context.world.hour, pending.context.world.seed, point);
         const weatherEnd = M.weather(pending.context.world.hour + duration / 60, pending.context.world.seed, point);
@@ -1405,6 +1532,8 @@
         };
       }
 
+      const settlement = prepareEventSettlement(active, pending, candidate);
+
       if (!pending.narrative) {
         const resultContext = {
           round: pending.context.round,
@@ -1416,6 +1545,8 @@
             point_reason: String(plan.point_reason || ''), probability_percent: plan.probability_percent,
             duration_minutes: pending.outcome.duration, start_time: pending.outcome.startTime, end_time: pending.outcome.endTime,
             random_draw_percent: pending.outcome.randomDraw, outcome: pending.outcome.resultText,
+            state_settlement: settlement.summary,
+            actual_collection: settlement.collected,
             weather_start: pending.outcome.weatherStart, weather_end: pending.outcome.weatherEnd
           },
           body: pending.context.body,
@@ -1423,34 +1554,67 @@
           island_agent_changes: pending.context.state_changes
         };
         const response = await requestCompletion(settings, [
-          { role: 'system', content: '你负责写一份简短、自然的中文事件记录。只输出 JSON 对象：human_summary、body_summary、before_scene、after_scene、island_summary，值均为字符串。必须按给定 event.outcome 和天气前后值写，不得改写结果或编造身体数值。身体部分只依据 body.parameter_changes 与求生者文字状态；有数值变化时保留其单位，没有则简洁描述文字状态。景象依据 scene_before_evidence 和研究者输入，写事件前与结束后两句；不推演过程中视野变化。岛屿变化以给定天气对照为准；若其他岛屿字段没有变化记录，就说明其他观测项基本不变。' },
+          { role: 'system', content: '你负责写一份简短、自然的中文事件记录。只输出 JSON 对象：human_summary、body_summary、before_scene、after_scene、island_summary，值均为字符串。必须按给定 event.outcome、state_settlement 和天气前后值写，不得改写实际结果或编造身体数值。body_summary 是供研究者阅读、最多120字的第一人称身体感受：优先把人体 Agent 当前参数、parameter_changes 和 statement 翻译成日常语言，说明变化方向；字段含义不明确时不要猜其生理含义。结合行动负荷、耗时、结果和环境描述有依据的主观感受；即使没有人体数值参数，也不要只重复“未配置参数”，可用定性语言简要表达本轮感受，但不得虚构可测数值或医学判断。采集到物品不等于已经吃喝。body_summary 只显示在事件报告，不写入 Agent 状态、对话历史或下一轮输入。before_scene 与 after_scene 根据 scene_before_evidence 和研究者输入各写一句，不推演行动过程中的视野变化。island_summary 以实际结算、给定天气对照为准；没有其他岛屿字段变化时说明其他观测项基本不变。' },
           { role: 'user', content: JSON.stringify(resultContext) }
         ], null, null, 'event_report_summary');
         pending.narrative = parseModelJson(response.content, '事件简报');
       }
 
       const planTitle = String(plan.event_title || pending.context.resource_intent?.name || '行动事件').slice(0, 60);
+      const bodySummary = String(pending.narrative.body_summary || '').trim().slice(0, 120)
+        || await generateBodySummary(settings, pending, `本轮已进行行动：${pending.outcome.resultText} 实际结算：${settlement.summary}`);
+      prepareEventFrameworkSettlement(active, pending);
+      const actualCollection = settlement.collected
+        ? `岛屿规则实际采集 ${settlement.collected.name} ${formatQuantity(settlement.collected.amount)} ${settlement.collected.unit}，已放入随身物品。`
+        : pending.context.resource_intent
+          ? `岛屿规则结算：${pending.outcome.success === true ? '结果显示成功，但没有产生可采集物品。' : '本次没有取得资源。'}`
+          : '';
       const report = {
         round: pending.context.round, title: planTitle, point: candidate,
         pointReason: String(plan.point_reason || ''),
-        resultText: `随机耗时 ${pending.outcome.duration} 分钟（${pending.outcome.startTime}—${pending.outcome.endTime}）。${pending.outcome.resultText}`,
+        resultText: `随机耗时 ${pending.outcome.duration} 分钟（${pending.outcome.startTime}—${pending.outcome.endTime}）。${pending.outcome.resultText}${actualCollection ? ' ' + actualCollection : ''}`,
         probability: Number.isInteger(plan.probability_percent) ? plan.probability_percent : null,
         durationMinutes: pending.outcome.duration,
         humanSummary: String(pending.narrative.human_summary || plan.summary || ''),
-        bodySummary: String(pending.narrative.body_summary || ''), bodyChanges: pending.context.body.parameter_changes,
+        bodySummary, bodyChanges: pending.context.body.parameter_changes,
         beforeScene: String(pending.narrative.before_scene || ''), afterScene: String(pending.narrative.after_scene || ''),
         islandSummary: [
           String(pending.narrative.island_summary || ''),
           `行动时长 ${pending.outcome.duration} 分钟（${pending.outcome.startTime}—${pending.outcome.endTime}）；当地天气：${pending.outcome.weatherStart} → ${pending.outcome.weatherEnd}。`
-        ].filter(Boolean).join('\n')
+        ].filter(Boolean).join('\n'),
+        settlementSummary: settlement.summary
       };
-      active.eventReports.push(report);
-      if (candidate) active.eventMarkers.push({ ...candidate, title: report.title });
+      if (!settlement.committed) {
+        G.IslandApp.setWorldState(settlement.world, settlement.position);
+        settlement.committed = true;
+        active.frame = settlement.frame;
+        active.frameworkCommandLog = [...active.frameworkCommandLog, ...settlement.commands.map(cloneJson)];
+        active.inventory = settlement.inventory;
+        active.previousRoundMessages = [
+          ...active.previousRoundMessages,
+          { kind: 'settlement', sender: '岛屿结算', text: settlement.summary }
+        ];
+      }
+      if (!settlement.reportAdded) {
+        active.eventReports.push(report);
+        settlement.reportAdded = true;
+      }
+      if (candidate && !settlement.markerAdded) {
+        active.eventMarkers.push({ ...candidate, title: report.title });
+        settlement.markerAdded = true;
+      }
       active.pendingEventReport = null;
-      renderEventReportPanel(active, `第 ${pending.context.round} 轮事件报告已完成。`);
+      renderFramework();
+      setAgentStatus(`第 ${pending.context.round} 轮已结算 · 模拟时间 +${pending.outcome.duration} 分钟`, 'ok');
+      status(`第 ${pending.context.round} 轮已结算：${settlement.summary}`, 'ok');
+      renderEventReportPanel(active, `第 ${pending.context.round} 轮报告与状态结算已完成。`);
     } catch (error) {
+      if (active.pendingEventReport !== pending) {
+        renderEventReportPanel(active, `第 ${pending.context.round} 轮状态已提交；界面更新提示：${error.message || String(error)}`);
+        return;
+      }
       pending.error = error.message || String(error);
-      renderEventReportPanel(active, `报告生成失败：${pending.error} · 本轮已提交，可稍后重试。`);
+      renderEventReportPanel(active, `报告或状态结算失败：${pending.error} · 本轮可稍后重试。`);
     }
   }
 
@@ -1488,7 +1652,7 @@
         interactionSession = {
           frame, frameworkAnchor: cloneJson(frame), frameworkCommandLog: [], round: 0,
           previousRoundMessages: [], retryPrompt: null, retryRecipients: [],
-          eventReports: [], eventMarkers: [], pendingEventReport: null
+          eventReports: [], eventMarkers: [], pendingEventReport: null, inventory: {}
         };
         clearEventReportPanel('新会话已开始，点位与报告已清空。');
         modelCalls = 0;
@@ -1536,7 +1700,7 @@
           onToolTurn: systemId => recordAgentToolDialogueTurn(systemId)
         }
       );
-      const reportContext = buildEventReportContext(worldSnapshot, mapPosition, roundNumber, researcherPrompt, beforeFrame, inference);
+      const reportContext = buildEventReportContext(worldSnapshot, mapPosition, roundNumber, researcherPrompt, beforeFrame, inference, active.inventory);
       active.frame = inference.frame;
       active.round = roundNumber;
       lastAgentRoundNumber = roundNumber;
@@ -1550,7 +1714,7 @@
       active.previousRoundMessages = messagesForNextRound(researcherPrompt, researcherRecipients, inference);
       active.pendingEventReport = {
         context: reportContext,
-        worldSnapshot, plan: null, outcome: null, narrative: null, error: ''
+        worldSnapshot, plan: null, outcome: null, narrative: null, settlement: null, error: ''
       };
       active.retryPrompt = null;
       active.retryRecipients = [];
@@ -1558,7 +1722,7 @@
       el('agentRoundCount').textContent = String(active.round);
       refreshBalance();
       renderFramework();
-      setAgentStatus('第 ' + roundNumber + ' 轮已提交 · 岛屿时钟未推进', 'ok');
+      setAgentStatus('第 ' + roundNumber + ' 轮已提交 · 等待事件状态结算', 'ok');
       status('Agent 第 ' + roundNumber + ' 轮已完成。所有状态变化均限于所属 system，并记录了理由。', 'ok');
       await continueEventReport(settings, active);
     } catch (error) {
@@ -1704,7 +1868,7 @@
       row.className = 'frameworkClockRow';
       name.textContent = system.system_id;
       clock.className = 'frameworkClockValue';
-      clock.textContent = 'time_clock · ' + system.time_clock + (system.system_id === 'survivor_agent' ? '（本地初始标注）' : '');
+      clock.textContent = 'time_clock · ' + system.time_clock + ' 分钟（累计模拟时间）';
       row.append(name, clock);
       box.append(row);
     }
