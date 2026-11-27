@@ -185,3 +185,13 @@ GitHub Pages 从仓库 `main` 根目录发布，地址固定为 `https://2024-da
 2026-11-26 v4.4 更新：增加任意非空 Key、手动 Base URL 与模型名、OpenAI 兼容路径规范化和错误分类；尚未完成真实服务商 API 验收。
 
 服务商预设：自动模式仅对 mgk_、sk-or-v1-、gsk_ 分别配置 ModelGo、OpenRouter、Groq 单一官方地址；普通 sk- 不猜服务商。显式选择 OpenAI/DeepSeek 后填入对应地址并获取模型；自定义地址可手改。所有输入变更清除旧模型并使在途查询失效。预设选择随记住 Key 选项保存。官方地址依据：https://console.groq.com/docs/openai 、https://openrouter.ai/docs/quickstart 、https://developers.openai.com/api/reference/overview 、https://api-docs.deepseek.com/ 。同济使用单独复选框，配置 https://agi.tongji.edu.cn/v1，Bearer 认证与 /chat/completions。复选状态仅随记住 Key 保存；手动换平台后自动取消。截图确认 tools/tool_choice 支持取决于模型；403 可能涉及校园网/VPN或授权。尚未验证校园网络、CORS或真实 Key，模型列表失败时可手填 Model ID。
+
+
+## v4.11.0 工作区与完整实验 PDF 导出（本地待推送）
+
+新增固定工作区导航、统一卡片与表单阅读层级、键盘焦点和窄屏布局。页面最下面可打开完整实验打印页，在浏览器选择另存为 PDF；包含本次会话全部成功轮次的任务、初始状态、参数前后值、推理输出、模型返回、工具与命令记录、事件报告和当前世界/物品状态，待完成报告和失败响应也附录保留。密钥字段与当前 Key 脱敏。数据只在当前会话保留，刷新或重置前需导出。网站不做质检或自动优化框架。
+
+已通过 survival-agent.js、workbench.js 语法检查与 git diff --check；未调用真实模型 API，PDF 实际分页和完整浏览器交互待体验。未提交、未推送。
+
+
+本次工作区优化补充：任务输入按标签页暂存草稿、字数与保存状态、清空草稿、最新对话定位、收起工具明细、密钥说明折叠、导航随阅读位置高亮、导出区显示当前轮数与状态、报告独立滚动及错误长文本换行。连接输入继续在最上方常显。workbench.js 语法与差异检查通过；浏览器视觉、交互及 PDF 分页仍待人工体验，未调用模型 API。

@@ -1,0 +1,29 @@
+html{scroll-behavior:smooth;scroll-padding-top:80px}
+.taskHelper,.transcriptTools{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:8px 0 16px;color:var(--muted);font-size:12px}
+.taskHelper button{margin-left:auto;padding:5px 10px}.taskHelper span:nth-child(2){font-size:11px}
+.transcriptTools{justify-content:flex-end;border-top:1px solid var(--line);padding-top:12px}.transcriptTools button{padding:7px 11px;font-size:12px}
+.connectionPrivacy{margin-top:10px;border-top:1px solid var(--line);padding-top:8px;color:var(--muted);font-size:12px}.connectionPrivacy summary{cursor:pointer}.connectionPrivacy p{max-width:100%;line-height:1.7}
+.agentChatMeta{font-variant-numeric:tabular-nums}.agentFailurePanel pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto}
+.eventReportList{max-height:85vh;overflow:auto;scrollbar-gutter:stable}.eventReportPane>.panelHead{position:sticky;top:52px;z-index:2;background:var(--white)}
+.monitorFieldValue{font-variant-numeric:tabular-nums}.monitorFieldRow{min-height:42px}.observerSidebar{min-width:0}
+.workspaceNav{position:sticky;top:0;z-index:25;display:flex;align-items:center;gap:6px;padding:10px 0;margin-bottom:12px;background:var(--paper);border-bottom:1px solid var(--line);overflow-x:auto;white-space:nowrap}
+.workspaceNav b{margin-right:auto;font-size:12px;letter-spacing:1px;color:var(--muted)}
+.workspaceNav a{padding:9px 13px;border-radius:8px;text-decoration:none;font-size:13px;color:var(--muted)}
+.workspaceNav a:hover,.workspaceNav a[aria-current]{background:var(--surface2);color:var(--accent)}
+button,input,select,textarea{transition:border-color .16s,background-color .16s,box-shadow .16s}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+button:disabled{cursor:not-allowed}
+.panel,.visibleConnection,.parameterMonitor{border-radius:16px;box-shadow:0 4px 22px #00000008}
+.intro{padding:14px 0}.intro h1{font-size:clamp(24px,3vw,38px);letter-spacing:-.6px}
+.agentChatPanel{padding:clamp(16px,2.4vw,30px)}
+#agentRoundPrompt{min-height:130px;line-height:1.8;border-radius:12px;padding:16px;background:var(--surface2);color:var(--ink);border:1px solid var(--line)}
+.agentChatActions{padding:12px 0;gap:10px;flex-wrap:wrap}
+.agentChatActions button{min-height:44px;border-radius:10px}
+.agentTranscript{scrollbar-gutter:stable;overscroll-behavior:contain}
+.agentRoundBlock{border-radius:12px;padding:18px;line-height:1.8}
+.eventReportCard{padding:20px}.eventTimeline li{padding:14px 16px}.eventTimeline li>strong{font-size:1em}
+.eventTimelineResult,.eventTimelineSettlement{font-size:.88em}
+.exportPanel{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:28px;margin:24px 0;border:1px solid var(--line);border-radius:16px;background:var(--white);color:var(--ink)}
+.exportPanel small{color:var(--accent);font-size:10px;letter-spacing:2px}.exportPanel h2{margin:8px 0;font-size:22px}.exportPanel p,.exportPanel span{color:var(--muted);font-size:13px;line-height:1.7}.exportPanel button{min-height:46px;flex-shrink:0;border-color:var(--accent);color:var(--accent);background:var(--surface2)}
+@media(max-width:720px){.workspaceNav b{display:none}.workspaceNav a{padding:9px;font-size:12px}.exportPanel{align-items:stretch;flex-direction:column;padding:20px}.agentChatPanel{padding:16px}.eventReportCard{padding:14px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}button,input,select,textarea{transition:none}}

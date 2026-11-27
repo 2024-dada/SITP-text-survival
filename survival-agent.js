@@ -1764,7 +1764,7 @@
         interactionSession = {
           frame, frameworkAnchor: cloneJson(frame), frameworkCommandLog: [], round: 0,
           previousRoundMessages: [], retryPrompt: null, retryRecipients: [],
-          eventReports: [], eventMarkers: [], pendingEventReport: null, inventory: {}
+          eventReports: [], eventMarkers: [], pendingEventReport: null, inventory: {}, archiveRounds: []
         };
         clearEventReportPanel('新会话已开始，点位与报告已清空。');
         modelCalls = 0;
@@ -1813,6 +1813,7 @@
         }
       );
       const reportContext = buildEventReportContext(worldSnapshot, mapPosition, roundNumber, researcherPrompt, beforeFrame, inference, active.inventory);
+      active.archiveRounds.push(cloneJson({ round: roundNumber, researcher_input: researcherPrompt, frame_before: beforeFrame, frame_after_agent: inference.frame, world_before: worldSnapshot, inference, model_responses: [...roundResponseLedger.entries()] }));
       active.frame = inference.frame;
       active.round = roundNumber;
       lastAgentRoundNumber = roundNumber;
@@ -2238,6 +2239,19 @@
   updateActionFields();
   updateAgentInteractionControls();
   keepIslandObserverReadOnly();
-  G.SurvivalAgent = Object.freeze({ refreshAfterIslandRender, getMonitorSnapshot });
+  function getExperimentArchive() {
+    if (!interactionSession) return null;
+    const active = interactionSession;
+    const archive = {
+      initial: active.frameworkAnchor,
+      rounds: active.archiveRounds,
+      reports: active.eventReports,
+      current: { frame: active.frame, world: G.IslandApp.getWorldState(), inventory: active.inventory, commands: active.frameworkCommandLog, pending_report: active.pendingEventReport, failed_responses: active.retryPrompt !== null ? [...roundResponseLedger.entries()] : [] }
+    };
+    const key = el('aiApiKey').value.trim();
+    const serialized = JSON.stringify(archive, (name, value) => /api.?key|secret|password|credential/i.test(name) ? '[已隐藏]' : value);
+    return JSON.parse(key ? serialized.split(key).join('[已隐藏]') : serialized);
+  }
+  G.SurvivalAgent = Object.freeze({ refreshAfterIslandRender, getMonitorSnapshot, getExperimentArchive });
   new MutationObserver(refreshAfterIslandRender).observe(el('nearby'), { childList: true });
 })(globalThis);
