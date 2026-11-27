@@ -329,6 +329,19 @@
     return 0;
   }
 
+  function completeToolCalls(message) {
+    if (!message || !Array.isArray(message.tool_calls) || !message.tool_calls.length) return false;
+    return message.tool_calls.every(call => {
+      if (!call || !call.id || call.type !== 'function' || !call.function || typeof call.function.name !== 'string' || typeof call.function.arguments !== 'string') return false;
+      try {
+        const args = JSON.parse(call.function.arguments);
+        return Boolean(args && typeof args === 'object' && !Array.isArray(args));
+      } catch {
+        return false;
+      }
+    });
+  }
+
   async function requestCompletion(settings, messages, tools, choice, systemId) {
     const contextExcerpt = responseContextExcerpt(messages);
     const responseSegments = [];
@@ -369,10 +382,31 @@
       responseSegments.push(accumulated);
     }
 
-    if (current.finishReason === 'length') {
+    if (current.finishReason === 'length' && firstToolCalls.length && completeToolCalls(current.message)) {
+      current.message._responseSegments = responseSegments.slice();
+      return current.message;
+    }
+
+    if (current.finishReason === 'length' && firstToolCalls.length) {
+      const recoveryMessages = messages.concat({
+        role: 'user',
+        content: '上一条回复在工具调用参数中达到单次输出上限。网页已保存原始片段；这条未完整的工具调用没有执行。请不要重发工具调用或声称它已成功；只根据已经完整收到的信息，简洁给出可支持的结论。依赖未执行计算的信息请明确标注未知/待核。'
+      });
+      current = await send(recoveryMessages, null, null, CONTINUATION_COMPLETION_TOKENS);
+      const recoveryText = typeof current.message.content === 'string' ? current.message.content : '';
+      recordAgentResponse(systemId, recoveryText, current.finishReason, '工具调用截断后的安全总结');
       if (Array.isArray(current.message.tool_calls) && current.message.tool_calls.length) {
-        throw new Error('模型在工具调用内容尚未完整时达到单次输出上限；该段原文已保存在本轮失败记录中。请缩短本轮任务或精简该系统规则后重试。');
+        throw new Error('工具调用被截断后仍未能安全总结；未执行不完整调用，原始响应已保存在失败记录中。');
       }
+      if (!recoveryText.trim()) {
+        throw new Error('工具调用被截断，安全总结请求没有返回文本；原始响应已保存在失败记录中。');
+      }
+      accumulated = recoveryText;
+      responseSegments.splice(0, responseSegments.length, recoveryText);
+      current.message.content = recoveryText;
+    }
+
+    if (current.finishReason === 'length') {
       while (current.finishReason === 'length') {
         continuationCount += 1;
         const tail = accumulated.slice(-MAX_CONTINUATION_TAIL_CHARS);
