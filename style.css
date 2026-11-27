@@ -262,6 +262,18 @@ dialog.textPreview::backdrop{background:rgba(15,27,21,.58)}
 .eventReportCard h3{margin:0 0 9px;padding-bottom:8px;border-bottom:1px solid var(--line);font-size:1em;color:var(--ink)}
 .eventReportOutcome{margin:0 0 8px;padding:9px 10px;border-left:3px solid var(--accent);border-radius:5px;background:color-mix(in srgb,var(--surface2),var(--accent) 12%);color:var(--ink);font-weight:700;line-height:1.65;overflow-wrap:anywhere}
 .eventReportLocation{margin:0 0 10px;color:var(--muted);font-size:.8em;line-height:1.5;overflow-wrap:anywhere}
+.eventReportPending{margin:0 0 12px;padding:10px 12px;border:1px solid var(--accent);border-radius:8px;background:color-mix(in srgb,var(--surface2),var(--accent) 7%);color:var(--ink)}
+.eventReportPending h3{margin:0 0 5px;font-size:.9em;color:var(--accent)}
+.eventReportPending p{margin:0;font-size:.82em;line-height:1.55;overflow-wrap:anywhere}
+.eventTimeline{display:flex;flex-direction:column;gap:8px;margin:12px 0 2px;padding:0;list-style:none}
+.eventTimeline li{padding:10px 11px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;background:color-mix(in srgb,var(--surface2),var(--accent) 5%);color:var(--ink)}
+.eventTimeline li>strong{display:block;margin-bottom:5px;font-size:.88em}
+.eventTimelineResult,.eventTimelineAssumption,.eventTimelineSettlement{margin:4px 0 0;font-size:.8em;line-height:1.6;overflow-wrap:anywhere}
+.eventTimelineAssumption{color:var(--muted)}
+.eventTimelineSettlement{color:var(--ink)}
+.eventTimelineScenes{margin-top:7px;color:var(--muted);font-size:.78em;line-height:1.55}
+.eventTimelineScenes summary{cursor:pointer;color:var(--accent)}
+.eventTimelineScenes p{margin:5px 0 0;overflow-wrap:anywhere}
 .eventReportField{padding-top:9px;margin-top:8px;border-top:1px solid var(--line)}
 .eventReportField strong{display:block;margin-bottom:3px;color:var(--accent);font-size:.78em}
 .eventReportField p{margin:0;color:var(--ink);font-size:.88em;line-height:1.7;white-space:pre-line;overflow-wrap:anywhere}

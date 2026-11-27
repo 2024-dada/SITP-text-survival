@@ -363,6 +363,7 @@
     const additions = [suffix];
     if (interactionMode) {
       additions.push(INTERACTION_TOOL_GUIDANCE);
+      additions.push('模拟推演约定：研究者要求模拟时，基于已载入参数、地图资源、天气、潮位、规则和本轮输入，主动补足行动细节并给出具体、连贯的模拟结果；精确数据缺失时给出合理估计、适用假设和不确定范围，不得只因未知而跳过。把观察到的框架值与模拟估计分开标明；估计用于情景推演和报告，不写入岛屿/身体参数，也不得称为实测。若用户未要求模拟或没有行动任务，不要自行推进活动。');
       if (system.system_id === 'A_geography_observation') additions.push(A_GEOGRAPHY_GUIDANCE);
     }
     return [system.rule, ...additions].filter(value => typeof value === 'string' && value.trim()).join('\n\n');
