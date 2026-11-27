@@ -4,13 +4,13 @@
 <div class="agentWorkbench">
 <section class="panel agentChatPanel" aria-labelledby="agentChatHeading">
   <div class="agentChatHead">
-    <div><h2 id="agentChatHeading">Agent 文本交互</h2><p>所有已载入 agent 每轮并行参与，并读取上一轮完整对话。</p></div>
+    <div><h2 id="agentChatHeading">Agent 文本交互</h2><p>所有已载入 agent 每轮并行参与；完整对话保存在本地会话，发送给模型的历史会按长度上限压缩。</p></div>
     <div class="agentChatMeta"><span id="agentInteractionStatus" class="agentInteractionStatus" role="status">载入 A/B/C 参考 Agent 中</span><span>已提交 <b id="agentRoundCount">0</b> 轮</span></div>
   </div>
   <label class="agentPromptLabel" for="agentRoundPrompt">本轮任务或问题（可留空）</label>
   <textarea id="agentRoundPrompt" rows="3" placeholder="可选：写一句本轮希望 agent 讨论的问题；留空时按各自 rule 和状态交互。"></textarea>
   <div class="agentRoster" role="group" aria-labelledby="agentRosterHeading">
-    <div class="agentRosterHead"><span id="agentRosterHeading">每轮参与的 Agent</span><strong id="agentRosterCount">等待载入 JSON</strong></div>
+    <div class="agentRosterHead"><span id="agentRosterHeading">每轮参与的 Agent</span><strong id="agentRosterCount">等待载入 JSON</strong><span id="agentToolTurnCount" class="agentToolTurnCount" aria-live="polite" title="各 Agent 的累计工具对话轮数">工具对话 0 轮</span></div>
     <div id="agentRosterList" class="agentRosterList" aria-live="polite"></div>
     <small>所有已载入 Agent 都会强制参与每一轮；研究者的问题发送给全体。</small>
   </div>
@@ -99,5 +99,5 @@
   <div id="parameterMonitorCards" class="monitorGrid"></div>
 </section>
 <footer><span>数据参考：OSM岸线 · FMS Lakeba温雨 · GLO90高程采样</span><span>静态页面 · 生存实验通过浏览器直连模型API · 身体示例不代表临床数据 / 观测算法 obs-dir-v4</span></footer></main>
-<dialog id="guide"><h2>Agent 文本交互</h2><p>网站默认附带并自动载入 A/B/C 参数参考框架；展开右侧“参数观测与岛屿视图”配置模型服务，也可换载其他 Olorua JSON systems。框架中的模拟设定和待确认项不代表本岛实测，也不会把内置身体示例当成岛屿数据。JSON 中每个 system 成为一个岛屿 agent；网站另接入一个无预置参数的求生者 agent。</p><p>每次由你点“运行一轮”。同一轮所有 agent 并行读取相同起始状态和上一轮完整对话；本轮结束后，下一轮才互相看到本轮发言。可选填一句任务，任务发送给全体；所有已载入 agent 每轮都会参与，不能单独关闭。只要一个 agent 失败，本轮状态就不提交，可重试同一轮。</p><p>agent 可以读取其他系统，但只能修改自己的参数、说明、事件队列和 time_clock 标注；每项状态变化都要求说明理由，并在聊天记录里显示修改前后。time_clock 标注不会推进岛屿模拟时钟。工具调用和错误收在可展开详情里。</p><p>右侧观测栏包含旧地图、天气、资源和水量演示信息，当前为只读。这里的地图与模拟参数不是待载入的岛屿组 JSON，也不能当成 Olorua 实测值。</p><button id="closeHelp">知道了</button></dialog>
+<dialog id="guide"><h2>Agent 文本交互</h2><p>网站默认附带并自动载入 A/B/C 参数参考框架；展开右侧“参数观测与岛屿视图”配置模型服务，也可换载其他 Olorua JSON systems。框架中的模拟设定和待确认项不代表本岛实测，也不会把内置身体示例当成岛屿数据。JSON 中每个 system 成为一个岛屿 agent；网站另接入一个无预置参数的求生者 agent。</p><p>每次由你点“运行一轮”。同一轮所有 agent 并行读取相同起始状态和上一轮内容；本轮结束后，下一轮才互相看到本轮发言。网页保留完整对话，但发送给模型的上一轮历史最多 8000 字符，过长时只带最近内容。每次请求分别设置 1800 tokens（首段）或 1200 tokens（续写段）的输出上限；超长回答会持续分段续写，直到模型结束。每段原文先保存在本轮记录中，再拼成完整回答。续写请求和工具对话都不设固定轮数上限；左侧计数器累计记录工具对话轮次，悬停可查看各 Agent 数量。可选填一句任务，任务发送给全体；所有已载入 agent 每轮都会参与，不能单独关闭。任一 agent 失败，本轮状态都不提交，可重试同一轮。</p><p>agent 可以读取其他系统，但只能修改自己的参数、说明、事件队列和 time_clock 标注；每项状态变化都要求说明理由，并在聊天记录里显示修改前后。time_clock 标注不会推进岛屿模拟时钟。工具调用、逐次模型输出和错误收在可展开详情里。</p><p>右侧观测栏包含旧地图、天气、资源和水量演示信息，当前为只读。这里的地图与模拟参数不是待载入的岛屿组 JSON，也不能当成 Olorua 实测值。</p><button id="closeHelp">知道了</button></dialog>
 <dialog id="textPreview" class="textPreview" aria-labelledby="textPreviewHeading"><div class="previewShell"><div class="previewTop"><div><h2 id="textPreviewHeading">文字放大预览</h2><span id="textPreviewZoom" aria-live="polite">100%</span></div><button id="closeTextPreview" type="button">关闭</button></div><div id="textPreviewStage" class="previewStage"><div id="textPreviewBody" class="previewBody"></div></div><p class="previewHint">滚轮以预览卡片中心缩放 · 点击卡片外关闭 · 内容取打开时刻</p></div></dialog></body></html>

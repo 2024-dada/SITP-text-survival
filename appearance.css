@@ -14,3 +14,5 @@ html[data-motion="on"] :is(button,.panel,.monitorCard){transition:background-col
 
 /* Status text uses the active theme palette; all theme modes meet WCAG AA. */
 body strong.simStatus{color:var(--ink);background:var(--surface2);border:1px solid var(--line)}
+
+body .agentToolTurnCount{background:var(--surface2);color:var(--ink);border-color:var(--line)}
