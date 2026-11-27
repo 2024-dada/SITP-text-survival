@@ -350,11 +350,14 @@
   }
 
   async function requestCompletion(settings, messages, tools, choice, systemId) {
-    const isReport = /^event_/.test(systemId || '');
-    if (isReport) messages = messages.concat({ role: 'user', content: '这是程序读取的 JSON。只返回紧凑完整 JSON，不输出思考过程、Markdown或重复说明。每个结果/依据字符串最多35字，概要最多120字；保留要求的全部时段。' });
+    const reportMode = systemId === 'event_report_plan' ? 'json'
+      : ['event_report_summary', 'event_body_summary'].includes(systemId) ? 'text' : '';
+    if (reportMode === 'json') messages = messages.concat({ role: 'user', content: '这是程序读取的行动计划数据。请只返回完整、紧凑且可解析的 JSON，不输出思考过程或 Markdown；保留研究者明确提出的全部行动时段，字段内容简洁但不要遗漏结算所需信息。' });
+    if (reportMode === 'text') messages = messages.concat({ role: 'user', content: '请直接给研究者一段自然、完整的中文报告。可以按内容自由分段或自拟小标题（纯文本，不加 Markdown 标记），不输出 JSON，不要为了套用固定栏目重复或补造信息；以本轮已提交结果和参数为依据。' });
     const contextExcerpt = responseContextExcerpt(messages);
     const responseSegments = [];
     let continuationCount = 0;
+    let reportRecoveryUsed = false;
     let accumulated = '';
 
     async function send(requestMessages, requestTools, requestChoice, maxTokens) {
@@ -440,15 +443,34 @@
           throw new Error('模型续写时返回了工具调用，无法安全拼接文本；已保留此前生成的分段。请缩短本轮任务后重试。');
         }
         if (!next || !next.trim()) {
-          if (isReport) {
-            const recovered = await send(messages.concat({ role: 'user', content: '上次 JSON 被截断且续写为空。请重新返回完整的紧凑 JSON，缩短各字段文字，不省略字段。' }), null, null, MAX_COMPLETION_TOKENS);
+          if (reportMode) {
+            if (reportMode === 'text' && reportRecoveryUsed && accumulated.trim()) {
+              current.message.content = accumulated;
+              current.message._responseSegments = responseSegments.slice();
+              return current.message;
+            }
+            const recoveryInstruction = reportMode === 'json'
+              ? '上次行动计划被截断且续写为空。请重新检查输入，只返回完整紧凑 JSON；保留所有明确安排的时段及结算所需字段。'
+              : '上次报告续写为空。请重新依据原始输入直接写一份完整、精炼的中文报告；可自由组织段落或小标题，不输出 JSON，不套固定栏目。';
+            reportRecoveryUsed = true;
+            const recovered = await send(messages.concat({ role: 'user', content: recoveryInstruction }), null, null, MAX_COMPLETION_TOKENS);
             const recoveredText = typeof recovered.message.content === 'string' ? recovered.message.content : '';
-            recordAgentResponse(systemId, recoveredText, recovered.finishReason, '报告紧凑重建');
+            recordAgentResponse(systemId, recoveredText, recovered.finishReason, reportMode === 'json' ? '行动计划紧凑重建' : '自由体报告重写');
             if (recoveredText.trim()) {
+              if (recovered.message.tool_calls?.length) throw new Error('报告重试返回了工具调用，无法作为报告内容使用。');
               // A provider may mark a complete JSON object as "length" when
-              // it ends exactly at the output boundary. Validate the payload
-              // itself instead of rejecting it by finish_reason alone.
-              parseModelJson(recoveredText, '重建报告');
+              // it ends exactly at the output boundary. Validate structured
+              // plans by their content; free-form reports are accepted as text.
+              if (reportMode === 'json') {
+                parseModelJson(recoveredText, '重建行动计划');
+              } else if (recoveredText.trim().startsWith('{')) {
+                parseFlexibleNarrative(recoveredText, '重建事件报告');
+              } else if (recovered.finishReason === 'length') {
+                current = recovered;
+                accumulated = recoveredText;
+                responseSegments.splice(0, responseSegments.length, recoveredText);
+                continue;
+              }
               recovered.message._responseSegments = [recoveredText];
               return recovered.message;
             }
@@ -1293,6 +1315,81 @@
     catch { throw new Error(label + '的 JSON 格式不完整，请重试报告。'); }
   }
 
+  function parseFlexibleNarrative(raw, label) {
+    const source = String(raw || '').trim().replace(/^```(?:json|text|markdown)?\s*/i, '').replace(/\s*```$/, '').trim();
+    if (!source) throw new Error(label + '没有返回可用文本。');
+    if (source.startsWith('{')) return parseModelJson(source, label);
+    return { human_summary: source };
+  }
+
+  function compactEventPlanContext(context) {
+    return {
+      round: context.round,
+      researcher_prompt: String(context.researcher_prompt || '').slice(0, 1800),
+      action_text: String(context.action_text || '').slice(0, 2800),
+      world: context.world,
+      event_candidates: (context.event_candidates || []).map(candidate => ({
+        id: candidate.id, name: candidate.name, zone: candidate.zone,
+        east_m: candidate.east_m, north_m: candidate.north_m,
+        distance_m: candidate.distance_m, elevation_m: candidate.elevation_m,
+        waterSource: Boolean(candidate.waterSource),
+        resources: (candidate.resources || []).map(resource => ({
+          resource: resource.resource, name: resource.name, amount: resource.amount,
+          unit: resource.unit, capacity_l: resource.capacity_l, note: resource.note
+        }))
+      })),
+      resource_intent: context.resource_intent,
+      resource_intents: context.resource_intents,
+      carried_items: context.carried_items,
+      simulation_policy: context.simulation_policy,
+      current_scene: String(context.current_scene || '').slice(0, 1100),
+      body: {
+        before_statement: String(context.body?.before_statement || '').slice(0, 500),
+        after_statement: String(context.body?.after_statement || '').slice(0, 700),
+        current_parameters: (context.body?.current_parameters || []).slice(0, 18),
+        parameter_changes: (context.body?.parameter_changes || []).slice(0, 18)
+      },
+      agent_outputs: (context.agent_outputs || []).map(agent => ({
+        agent: agent.agent, statement: String(agent.statement || '').slice(0, 450),
+        final_text: String(agent.final_text || '').slice(0, 650)
+      })),
+      state_changes: (context.state_changes || []).slice(-16)
+    };
+  }
+
+  function validateEventPlan(plan, context) {
+    if (!plan || typeof plan !== 'object' || Array.isArray(plan) || !Array.isArray(plan.steps)) {
+      throw new Error('行动时间线没有返回可结算的 steps 列表。');
+    }
+    const maxMinutes = 24 * 366 * 5 * 60;
+    let previousEnd = 0;
+    const candidates = new Map((context.event_candidates || []).map(candidate => [candidate.id, candidate]));
+    for (const [index, step] of plan.steps.entries()) {
+      if (!step || typeof step !== 'object' || Array.isArray(step)) throw new Error(`第 ${index + 1} 个行动时段格式无效。`);
+      if (!Number.isInteger(step.start_offset_minutes) || step.start_offset_minutes < previousEnd || step.start_offset_minutes % 15) throw new Error(`第 ${index + 1} 个行动时段的开始时间无效或与前项重叠。`);
+      if (!Number.isInteger(step.duration_minutes) || step.duration_minutes < 15 || step.duration_minutes % 15) throw new Error(`第 ${index + 1} 个行动时段的耗时必须为15分钟的正整数倍。`);
+      previousEnd = step.start_offset_minutes + step.duration_minutes;
+      if (previousEnd > maxMinutes) throw new Error('本轮行动时间线超过岛屿时钟可结算范围。');
+      if (!String(step.time_label || '').trim() || !String(step.activity || '').trim() || !String(step.assumption || '').trim()) throw new Error(`第 ${index + 1} 个行动时段缺少时间、行动或推算依据。`);
+      if (!Number.isInteger(step.probability_percent) || step.probability_percent < 0 || step.probability_percent > 100) throw new Error(`第 ${index + 1} 个行动时段的成功率必须是0至100的整数。`);
+      if (!String(step.success_result || '').trim() || !String(step.failure_result || '').trim()) throw new Error(`第 ${index + 1} 个行动时段缺少成功或未成功结果。`);
+      if (step.point_id !== null && step.point_id !== undefined && !candidates.has(step.point_id)) throw new Error(`第 ${index + 1} 个行动时段引用了地图候选列表外的点位。`);
+      if (step.resource_id !== null && step.resource_id !== undefined && typeof step.resource_id !== 'string') throw new Error(`第 ${index + 1} 个行动时段的资源标识无效。`);
+    }
+    return candidates;
+  }
+
+  function planRecoverySource(context) {
+    const prompt = String(context.researcher_prompt || '').trim();
+    const agents = (context.agent_outputs || []).map(agent => {
+      const text = String(agent.final_text || agent.statement || '').trim();
+      return text ? `${agent.agent}：${text.slice(0, 550)}` : '';
+    }).filter(Boolean);
+    return [prompt ? `研究者本轮输入：${prompt.slice(0, 900)}` : '',
+      agents.length ? `已提交的 Agent 推理：\n${agents.join('\n')}` : '本轮 Agent 已提交状态；具体输出见本轮交互记录。']
+      .filter(Boolean).join('\n\n').slice(0, 2200);
+  }
+
   function formatQuantity(value) {
     return String(Number(Number(value).toFixed(3)));
   }
@@ -1543,11 +1640,11 @@
       event_status: eventStatus || '本轮没有确认具体行动事件。'
     };
     const response = await requestCompletion(settings, [
-      { role: 'system', content: '你负责写供研究者阅读的中文身体感受报告，只输出 JSON：{"body_summary":"..."}。用第一人称日常语言，优先依据人体参数、单位、前后变化和求生者 Agent 的本轮表述。把已给出的行动时间线、负荷、天气和结果用于具象化感受。缺少具体身体参数时，不要停在“没有数据/没有变化”：给出有依据的定性情境推测，并用“推测”“按本轮情境”表明它是模拟感受；不得捏造体征数值、医学结论或把推测写成测量值。不要把未进食的物品写成已摄入。覆盖本轮主要变化，控制在260字以内。这段人话只显示在事件报告，不写入 Agent 状态、对话历史或下一轮输入。' },
+      { role: 'system', content: '请为研究者写求生者身体感受简报。使用第一人称、自然中文，根据人体 Agent 已提交的状态描述、参数及前后变化，并结合本轮实际行动时长、天气与结果来表达。不要按固定句式或固定栏目填空，可自由组织语言。没有具体身体参数时，可以根据已知活动给出定性模拟推测，并明确这是推测；不要捏造体征数值或医学结论，不要把物品采集写成已进食/饮水。优先写出最有意义的感受，260字以内。这段简报只显示在事件报告，不写入 Agent 状态、对话历史或下一轮输入；直接输出纯文本，不使用 Markdown 标记。' },
       { role: 'user', content: JSON.stringify(context) }
     ], null, null, 'event_body_summary');
-    const parsed = parseModelJson(response.content, '人体感受报告');
-    const summary = String(parsed.body_summary || '').trim().slice(0, 260);
+    const parsed = parseFlexibleNarrative(response.content, '人体感受报告');
+    const summary = String(parsed.body_summary || parsed.human_summary || parsed.report_text || '').trim().slice(0, 420);
     if (!summary) throw new Error('事件报告没有返回有效的人体感受，请重试报告。');
     pending.bodySummary = summary;
     return summary;
@@ -1654,7 +1751,7 @@
         card.append(timeline);
       }
       reportField(card, '点位依据', report.pointReason);
-      reportField(card, '事件概要', report.humanSummary);
+      reportField(card, 'AI 事件报告', report.humanSummary);
       reportField(card, '人体 Agent 感受', report.bodySummary);
       reportField(card, '报告整理', report.recoveryNote);
       reportField(card, '人体框架参数变化', reportBodyChanges(report));
@@ -1695,11 +1792,35 @@
     renderEventReportPanel(active, '正在整理本轮点位与事件报告……');
     try {
       if (!pending.plan) {
-        const response = await requestCompletion(settings, [
+        let plan;
+        let firstPlanError;
+        try {
+          const response = await requestCompletion(settings, [
           { role: 'system', content: '你是本轮行动时间线模拟器与报告规划器。必须结合研究者输入、全部 Agent 本轮输出、现有地图资源、天气、潮位、当前时刻、已提交参数变化和随身物品，生成完整、连贯、具体的行动时间线。只输出 JSON：{"title":"...","summary":"...","steps":[{"time_label":"06:00","start_offset_minutes":0,"duration_minutes":30,"activity":"...","point_id":"site:191或null","resource_id":"R05或null","probability_percent":35,"success_result":"...","failure_result":"...","assumption":"...","point_reason":"..."}]}。用户给出时间表时，每项都必须出现在 steps 中，不能只挑一个代表事件；未给出的时长、地点、成功概率和细节按已知数据作合理模拟估计，并写明依据/假设。数据不足时仍给出最合理的情境估计，不得因此把活动删掉或说整轮未开始；不要把估计说成实测。成功率为0至100整数，网页会用实验种子逐项抽样。每步 duration_minutes 是正的15分钟整数倍；start_offset_minutes 是相对当前模拟时刻的分钟偏移，所有步骤顺序排列且不得重叠，时间间隔也会计入总耗时。用户给出明确时刻时，应按当前世界时钟把 start_offset_minutes 换算到对应时刻，跨午夜按顺序进入下一日；time_label 保留输入中的时刻。每项都写清成功与未成功会发生什么。point_id 必须来自 event_candidates，也可为null；只有要采集某个已列入点位的资源时才填对应 resource_id，且点位必须有该资源。W01/W02 只在 water_sources 对应候选中出现，取水必须检查随身物品是否有容器，W01 是原水；R08 鸟类只观察不捕猎，R04 山羊活动区仅用于观察而非直接采集。对于生火、休息、观察等不改变库存的活动，照样给出耗时、场景和概率，resource_id 设null。对不能由岛屿规则直接落账的结果，仍报告模拟抽样结果，并明确该估计不改写岛屿库存。除了没有任何活动任务的纯讨论外，steps 不得为空。不要输出 Markdown。' },
           { role: 'user', content: JSON.stringify(pending.context) }
-        ], null, null, 'event_report_plan');
-        const plan = parseModelJson(response.content, '点位判断');
+          ], null, null, 'event_report_plan');
+          plan = parseModelJson(response.content, '点位判断');
+          validateEventPlan(plan, pending.context);
+        } catch (error) {
+          firstPlanError = error.message || String(error);
+          try {
+            const response = await requestCompletion(settings, [
+              { role: 'system', content: '你是本轮行动时间线模拟器（紧凑重试）。请依据输入中的研究者任务、Agent 结果和现有岛屿数据，补全合理的模拟行动；只输出完整 JSON：{"title":"...","summary":"...","steps":[{"time_label":"09:00","start_offset_minutes":0,"duration_minutes":30,"activity":"...","point_id":"候选 id 或 null","resource_id":"候选资源 id 或 null","probability_percent":50,"success_result":"...","failure_result":"...","assumption":"...","point_reason":"..."}]}。明确时刻和行动都要保留；未知细节可用有依据的模拟估计，不把估计写成观测事实。各时段顺序、不重叠、时长为15分钟整数倍；概率为0至100整数；点位只能取 event_candidates 中的 id，资源只能取该点位实际列出的资源。取水须有容器且 W01 是原水；R08 鸟类只观察，R04 山羊活动区只观察。只在确实没有行动任务时 steps 才可为空。' },
+              { role: 'user', content: JSON.stringify(compactEventPlanContext(pending.context)) }
+            ], null, null, 'event_report_plan');
+            plan = parseModelJson(response.content, '精简重试的行动计划');
+            validateEventPlan(plan, pending.context);
+          } catch (retryError) {
+            const retryMessage = retryError.message || String(retryError);
+            plan = {
+              title: '本轮推理报告',
+              summary: planRecoverySource(pending.context),
+              steps: []
+            };
+            pending.planRecoveryNote = `行动时间线在常规生成和精简重试后仍未形成可结算计划（${retryMessage.slice(0, 180)}）。本报告仍根据已保存的研究者输入与 Agent 结果整理；为避免把未确认行动当成事实，本轮岛屿时间与资源未推进。`;
+            pending.planRecoveryError = `${firstPlanError}；精简重试：${retryMessage}`;
+          }
+        }
         if (!Array.isArray(plan.steps)) throw new Error('行动时间线没有返回 steps 列表，请重试报告。');
         const maxMinutes = 24 * 366 * 5 * 60;
         let previousEnd = 0;
@@ -1744,7 +1865,9 @@
       G.IslandApp?.setEventMarkers([...active.eventMarkers, ...previews]);
       el('eventMapCount').textContent = `${active.eventMarkers.length + previews.length} 个点位（含待结算）`;
       const settlement = plan.steps.length ? prepareTimelineSettlement(active, pending) : null;
-      const noActivitySettlement = '本轮没有安排行动时段；已整理研究者输入与 Agent 推理，岛屿时间和资源未变化。';
+      const noActivitySettlement = pending.planRecoveryNote
+        ? '行动计划没有形成可结算数据；本轮仅整理已提交的研究者输入与 Agent 推理，岛屿时间和资源保持不变。'
+        : '本轮没有安排行动时段；已整理研究者输入与 Agent 推理，岛屿时间和资源未变化。';
 
       if (!pending.narrative) {
         const resultContext = {
@@ -1754,6 +1877,7 @@
           timeline_plan: plan.steps,
           timeline_results: settlement?.steps || [],
           state_settlement: settlement?.summary || noActivitySettlement,
+          plan_recovery_note: pending.planRecoveryNote || '',
           body: pending.context.body,
           scene_before_evidence: pending.context.current_scene,
           scene_after_evidence: settlement && M.observe ? M.observe(settlement.world, settlement.position)?.role || '' : pending.context.current_scene,
@@ -1761,10 +1885,10 @@
         };
         try {
           const response = await requestCompletion(settings, [
-          { role: 'system', content: '你负责把本轮全部 Agent 推理与行动时间线整理成简洁自然的中文报告，只输出 JSON：human_summary、body_summary、before_scene、after_scene、island_summary，值均为字符串。human_summary 必须概括整条时间线，不能只复述一个行动。逐步结果、种子抽样、天气和状态落账已在输入中给出，必须据此写，不能改写实际结算；每一步的估算是本实验的模拟情景，可具体描述，但不能说成实地观测。body_summary 用第一人称日常语言，把人体参数、单位、前后变化和 survivor_agent 本轮表述转换成感受；缺少数值时结合行动负荷、持续时间、天气和实际结果给出有依据的定性推测，不要以“未配置参数”作为主体内容，不得编造体征数值或医学结论。取到物品不等于已进食或饮水。body_summary 只展示在报告，不写入 Agent 状态、对话历史或下一轮输入。before_scene 和 after_scene 各写一句，依据给出的场景证据及最终天气；island_summary 概括时间线前后天气与已落账的岛屿参数/资源变化，其他字段没有变化时明确写出。' },
+          { role: 'system', content: '你是研究者的模拟结果记录助手。请基于输入，为本轮写一份准确、具体、易读的中文事件报告。报告格式由你根据本轮内容决定：可以用自然段、叙事、小标题或简短列表；不必套固定框架、固定字段或预设顺序，也不要为了填栏目重复信息。可自由叙述，优先突出本轮关键发现与结果；小标题用纯文本，不加 Markdown 标记。把研究者任务、所有 Agent 已提交的关键推理、实际执行的行动与抽样结果、行动前后景象、求生者身体参数变化及其主观感受，以及天气/资源/岛屿状态的实际变化自然地组织起来。先抓住本轮最有意义的事情，避免机械罗列。计划失败或没有行动时，说明已保存的推理内容和未完成的部分；绝不能把未确认行动写成已发生，也不能虚构成功率、时长、体征数值、资源变化或天气变化。估计可用于模拟叙述，但要与已提交参数和结算事实区分，不能伪称实地观测或实测值。身体感受可结合已给人体参数和活动作定性表达，不得编造数值或医学结论；取到物品不等于已经进食或饮水。报告只显示在本轮报告，不写回 Agent 状态或下一轮输入。直接输出纯文本报告，不输出 JSON、Markdown 标记或解释写作过程。' },
           { role: 'user', content: JSON.stringify(resultContext) }
           ], null, null, 'event_report_summary');
-          pending.narrative = parseModelJson(response.content, '事件简报');
+          pending.narrative = parseFlexibleNarrative(response.content, '事件简报');
         } catch (error) {
           pending.narrative = fallbackEventNarrative(pending, plan, settlement, noActivitySettlement);
           pending.narrativeRecoveryNote = pending.narrative.recovery_note;
@@ -1772,7 +1896,7 @@
         }
       }
 
-      let bodySummary = String(pending.narrative.body_summary || '').trim().slice(0, 260);
+      let bodySummary = String(pending.narrative.body_summary || '').trim().slice(0, 420);
       if (!bodySummary) {
         try {
           bodySummary = await generateBodySummary(settings, pending, settlement?.summary || noActivitySettlement);
@@ -1789,7 +1913,9 @@
       const endTime = settlement ? settlement.steps[settlement.steps.length - 1].endTime : pending.context.world.time_text;
       const timelineResult = settlement
         ? `按时间线模拟并结算 ${settlement.steps.length} 个时段（${startTime}—${endTime}），岛屿时间推进 ${settlement.durationMinutes} 分钟。`
-        : '本轮没有安排行动时段，报告汇总了研究者输入和 Agent 推理。';
+        : pending.planRecoveryNote
+          ? '行动计划未能形成可结算时间线；报告依据已提交的输入与 Agent 推理整理，本轮时间和资源未推进。'
+          : '本轮没有安排行动时段，报告汇总了研究者输入和 Agent 推理。';
       const report = {
         round: pending.context.round, title: String(plan.title || (settlement ? '本轮行动时间线' : '本轮讨论')).slice(0, 80),
         point: firstCandidate ? { name: firstCandidate.name, zone: firstCandidate.zone, east_m: firstCandidate.east_m, north_m: firstCandidate.north_m } : null,
@@ -1798,11 +1924,12 @@
         durationMinutes: settlement?.durationMinutes || 0,
         humanSummary: String(pending.narrative.human_summary || plan.summary || ''),
         bodySummary, bodyChanges: pending.context.body.parameter_changes,
-        recoveryNote: pending.narrativeRecoveryNote || '',
+        recoveryNote: [pending.planRecoveryNote, pending.narrativeRecoveryNote].filter(Boolean).join('\n'),
         steps: settlement?.steps || [],
-        beforeScene: String(pending.narrative.before_scene || ''), afterScene: String(pending.narrative.after_scene || ''),
+        beforeScene: String(pending.narrative.before_scene || settlement?.steps?.[0]?.sceneBefore || pending.context.current_scene || ''),
+        afterScene: String(pending.narrative.after_scene || settlement?.steps?.[settlement.steps.length - 1]?.sceneAfter || settlement?.steps?.[0]?.sceneBefore || pending.context.current_scene || ''),
         islandSummary: [
-          String(pending.narrative.island_summary || ''),
+          String(pending.narrative.island_summary || settlement?.summary || noActivitySettlement),
           settlement ? `整轮模拟时段 ${settlement.durationMinutes} 分钟（${startTime}—${endTime}）；每项活动的局地天气变化列在时间线中。` : ''
         ].filter(Boolean).join('\n'),
         settlementSummary: settlement?.summary || noActivitySettlement
@@ -1835,9 +1962,11 @@
       }
       active.pendingEventReport = null;
       renderFramework();
-      setAgentStatus(settlement ? `第 ${pending.context.round} 轮已结算 · 模拟时间 +${settlement.durationMinutes} 分钟` : `第 ${pending.context.round} 轮报告已整理 · 本轮无行动时段`, 'ok');
-      status(settlement ? `第 ${pending.context.round} 轮已结算：${settlement.summary}` : `第 ${pending.context.round} 轮报告已整理；没有安排行动时间线。`, 'ok');
-      renderEventReportPanel(active, `第 ${pending.context.round} 轮报告与状态结算已完成${pending.narrativeRecoveryNote ? '；简报已根据本轮记录自动补全' : ''}。`);
+      setAgentStatus(settlement ? `第 ${pending.context.round} 轮已结算 · 模拟时间 +${settlement.durationMinutes} 分钟` : `第 ${pending.context.round} 轮报告已整理 · 本轮未推进岛屿状态`, 'ok');
+      status(settlement ? `第 ${pending.context.round} 轮已结算：${settlement.summary}` : pending.planRecoveryNote
+        ? `第 ${pending.context.round} 轮报告已整理；行动计划未形成可结算数据，岛屿时间和资源未变化。`
+        : `第 ${pending.context.round} 轮报告已整理；没有安排行动时间线。`, 'ok');
+      renderEventReportPanel(active, `第 ${pending.context.round} 轮报告与状态结算已完成${pending.planRecoveryNote || pending.narrativeRecoveryNote ? '；已根据可用记录整理报告' : ''}。`);
     } catch (error) {
       if (active.pendingEventReport !== pending) {
         renderEventReportPanel(active, `第 ${pending.context.round} 轮状态已提交；界面更新提示：${error.message || String(error)}`);
