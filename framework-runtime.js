@@ -41,8 +41,8 @@
       }, required: ['name', 'value'], additionalProperties: false } }
     }, ['target_system_id', 'event_description', 'delta_parameters']),
     makeTool('consume_events', '排队清空当前负责系统已经处理的事件。', {}, []),
-    makeTool('math_eval', '计算兼容 libmatheval 的表达式：数字、常数、变量、括号、+ - * / ^（也接受 **）及单变量初等函数。', {
-      expression: { type: 'string' },
+    makeTool('math_eval', '计算兼容 libmatheval 的表达式：数字、常数、变量、括号、+ - * / ^（也接受 **）及单变量初等函数。单个表达式最多240字符且不能换行；复杂计算拆成短表达式分步调用，不要把整批坐标写成一个长公式。', {
+      expression: { type: 'string', description: '一个独立短表达式，最多240字符且不能换行。' },
       variables: { type: 'array', items: { type: 'object', properties: {
         name: { type: 'string' },
         value: { type: 'number' }
@@ -74,6 +74,9 @@
       message: { type: 'string' }
     }, ['target_system_ids', 'message'])
   ];
+
+  const INTERACTION_TOOL_GUIDANCE = '工具调用参数应保持简短。math_eval 的单个 expression 最多240字符且不能换行；不要把完整地图、整批数据或长坐标列表塞进一个公式。确需长计算时，拆成与问题直接相关的短计算，分多次工具往返完成；如果当前数据不支持精确结论，就说明未知，不要用过度计算补造结论。每次回复只提交少量必要工具调用，工具对话没有固定总轮数上限。';
+  const A_GEOGRAPHY_GUIDANCE = '空间数据边界：fixed_scene_data.ring 是岛屿外边界，不是连续沙滩路线或可通行跑道。岸带网格标签也不能证明某段沙滩连续、无障碍且可跑。遇到“沿沙滩跑3公里”等问题，只有数据明确标出经核验路线和通行条件时才能判断；否则标注未知/待核，不得把整圈外边界周长当作跑道长度。';
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -158,7 +161,7 @@
   }
 
   function evaluateMath(expression, variables) {
-    if (typeof expression !== 'string' || expression.length > 240 || /[\r\n]/.test(expression) || !Array.isArray(variables)) throw new Error('math_eval输入格式不合法（表达式最多240字符且不能换行）。');
+    if (typeof expression !== 'string' || expression.length > 240 || /[\r\n]/.test(expression) || !Array.isArray(variables)) throw new Error('math_eval输入格式不合法（表达式最多240字符且不能换行）；请拆分为短计算，不要合并大量点位。');
     const values = new Map(variables.map(item => {
       if (!item || typeof item.name !== 'string' || !item.name || !Number.isFinite(item.value)) throw new Error('math_eval变量名或数值不合法。');
       return [item.name, item.value];
@@ -356,8 +359,13 @@
     throw new Error('不支持的工具：' + String(name));
   }
 
-  function systemPrompt(system, suffix) {
-    return system.rule + (suffix ? '\n\n' + suffix : '');
+  function systemPrompt(system, suffix, interactionMode) {
+    const additions = [suffix];
+    if (interactionMode) {
+      additions.push(INTERACTION_TOOL_GUIDANCE);
+      if (system.system_id === 'A_geography_observation') additions.push(A_GEOGRAPHY_GUIDANCE);
+    }
+    return [system.rule, ...additions].filter(value => typeof value === 'string' && value.trim()).join('\n\n');
   }
 
   function shortenContextText(value, maxChars) {
@@ -449,11 +457,11 @@
     return messages;
   }
 
-  async function runSystem(snapshot, system, requestCompletion, suffix, context, availableTools, requireReasons, onToolTurn) {
+  async function runSystem(snapshot, system, requestCompletion, suffix, context, availableTools, interactionMode, onToolTurn) {
     const initialState = systemState(snapshot, system);
     if (context) initialState.interaction_context = clone(context);
     const baseMessages = [
-      { role: 'system', content: systemPrompt(system, suffix) },
+      { role: 'system', content: systemPrompt(system, suffix, interactionMode) },
       { role: 'user', content: JSON.stringify(initialState) }
     ];
     const toolTurns = [];
@@ -491,7 +499,7 @@
         try {
           const args = parseArguments(call);
           traceArgs = clone(args);
-          result = executeTool(snapshot, system, operations, call.function.name, args, availableTools, requireReasons);
+          result = executeTool(snapshot, system, operations, call.function.name, args, availableTools, interactionMode);
           toolsUsed.push(call.function.name);
         } catch (error) {
           result = { ok: false, error: error.message || String(error) };
