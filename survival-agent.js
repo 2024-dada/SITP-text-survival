@@ -5,12 +5,12 @@
   const R = G.SITPFrameworkRuntime;
   const el = id => document.getElementById(id);
   const PARAMETER_LABELS = {
-    core_temp_c: '核心体温（℃）', skin_blood_flow_ml_min: '皮肤血流（ml/min）',
-    shivering_heat_ml_min: '寒战产热（示例值）', sweat_rate_ml_h: '出汗（ml/h）',
-    heart_rate_bpm: '心率（次/min）', systolic_bp_mmhg: '收缩压（mmHg）',
-    diastolic_bp_mmhg: '舒张压（mmHg）', cardiac_output_l_min: '心输出量（L/min）',
-    respiratory_rate_bpm: '呼吸频率（次/min）', tidal_volume_ml: '潮气量（ml）',
-    minute_ventilation_l_min: '每分钟通气量（L/min）'
+    core_temp_c: '核心体温', skin_blood_flow_ml_min: '皮肤血流',
+    shivering_heat_ml_min: '寒战产热（示例值）', sweat_rate_ml_h: '出汗',
+    heart_rate_bpm: '心率', systolic_bp_mmhg: '收缩压',
+    diastolic_bp_mmhg: '舒张压', cardiac_output_l_min: '心输出量',
+    respiratory_rate_bpm: '呼吸频率', tidal_volume_ml: '潮气量',
+    minute_ventilation_l_min: '每分钟通气量'
   };
   const activityMET = { move: 3, collect: 2, rest: 1 };
   const MAX_COMPLETION_TOKENS = 1800;
@@ -871,7 +871,9 @@
     const before = new Map(oldSystem.parameters.map(parameter => [parameter.param, parameter.value]));
     const changes = [];
     for (const parameter of newSystem.parameters) if (before.get(parameter.param) !== parameter.value) {
-      changes.push((PARAMETER_LABELS[parameter.param] || parameter.param) + ' ' + (Number.isFinite(before.get(parameter.param)) ? before.get(parameter.param) : '新增') + ' → ' + parameter.value);
+      const unit = G.SITPParameterUnits ? G.SITPParameterUnits.get(parameter.param) : '1（无量纲，推定）';
+      const previous = before.has(parameter.param) ? before.get(parameter.param) + ' ' + unit : '新增';
+      changes.push((PARAMETER_LABELS[parameter.param] || parameter.param) + ' ' + previous + ' → ' + parameter.value + ' ' + unit);
     }
     for (const parameter of oldSystem.parameters) if (!newSystem.parameters.some(item => item.param === parameter.param)) changes.push((PARAMETER_LABELS[parameter.param] || parameter.param) + ' 已移除');
     return changes;
