@@ -431,6 +431,12 @@
 
     if (current.finishReason === 'length') {
       while (current.finishReason === 'length') {
+        if (reportMode === 'json' && accumulated.trim()) {
+          try {
+            parseModelJson(accumulated, '行动计划');
+            break;
+          } catch { /* Continue only while the structured response is incomplete. */ }
+        }
         continuationCount += 1;
         const tail = accumulated.slice(-MAX_CONTINUATION_TAIL_CHARS);
         const continuationMessages = [
@@ -447,6 +453,7 @@
         if (next) {
           const overlap = exactOverlapLength(accumulated, next);
           const addition = next.slice(overlap);
+          if (!addition.trim()) throw new Error('模型续写重复了已有内容，未生成新文本。');
           accumulated += addition;
           responseSegments.push(addition);
         }
@@ -1759,7 +1766,7 @@
     G.IslandApp?.setEventMarkers(markers);
     el('eventMapCount').textContent = `${markers.length} 个点位${previewMarkers.length ? '（含待结算）' : ''}`;
     el('eventReportStatus').textContent = statusText || (active?.pendingEventReport?.error
-      ? '报告或状态结算失败：' + active.pendingEventReport.error + ' · 可重试完成本轮结算。'
+      ? '等待重试本轮报告与结算。'
       : reports.length ? `已整理 ${reports.length} 轮事件记录。` : '完成一轮推理后，这里会生成简要事件报告。');
     el('retryEventReport').hidden = !(active?.pendingEventReport && !busy);
   }
@@ -1814,7 +1821,13 @@
             };
             validateEventPlan(plan, pending.context);
           } catch (retryError) {
-            throw new Error(`行动计划未生成。常规请求：${firstPlanError}；精简请求：${retryError.message || retryError}。请重试本轮报告与结算。`);
+            try {
+              plan = await recoverEventPlanRows(settings, pending.context);
+              validateEventPlan(plan, pending.context);
+            } catch (rowError) {
+              pending.planRecoveryError = [firstPlanError, retryError.message, rowError.message].join(" / ");
+              throw new Error('模型未返回完整行动步骤，本轮尚未结算。可重试本轮，无需重新运行 Agent。');
+            }
           }
         }
         if (!Array.isArray(plan.steps)) throw new Error('行动时间线没有返回 steps 列表，请重试报告。');
@@ -1968,8 +1981,31 @@
         return;
       }
       pending.error = error.message || String(error);
-      renderEventReportPanel(active, `报告或状态结算失败：${pending.error} · 本轮可稍后重试。`);
+      renderEventReportPanel(active, '等待重试本轮报告与结算。');
     }
+  }
+
+  async function recoverEventPlanRows(settings, context) {
+    const evidence = compactEventPlanContext(context);
+    const response = await requestCompletion(settings, [
+      { role: 'system', content: '把整个任务转为岛屿行动。每步只写一行，以 | 分隔：起始时刻HH:mm|距当前分钟|耗时分钟|动作|候选地点ID|采集资源ID或-|成功率整数|成功结果|失败结果|推算依据。所有明确时段都保留，按15分钟步长且不重叠。原地用 observer；仅能采集地点已有且允许采集的资源，缺条件或无法落账时资源写 -；无容器不可取水，鸟和山羊只能观察。未指定细节按当前世界作合理估计。最后独占一行写 END，别写其他说明。纯讨论才只写 NONE 和 END 两行。' },
+      { role: 'user', content: JSON.stringify({
+        task: context.researcher_prompt, world: context.world, inventory: context.carried_items,
+        evidence: evidence.agent_outputs, candidates: evidence.event_candidates
+      }) }
+    ], null, null, 'event_plan_rows', { singleResponse: true });
+    const rows = String(response.content || '').trim().split(/\r?\n/).map(row => row.trim()).filter(Boolean);
+    if (rows.pop() !== 'END' || !rows.length) throw new Error('行动清单缺少完整结束标记。');
+    const steps = rows.length === 1 && rows[0] === 'NONE' ? [] : rows.map(row => {
+      const fields = row.split('|').map(value => value.trim());
+      if (fields.length !== 10 || fields.some(value => !value)) throw new Error('行动清单字段不完整。');
+      const [time_label, offset, duration, activity, point_id, resource, probability,
+        success_result, failure_result, assumption] = fields;
+      return { time_label, start_offset_minutes: Number(offset), duration_minutes: Number(duration),
+        activity, point_id, resource_id: resource === '-' ? null : resource,
+        probability_percent: Number(probability), success_result, failure_result, assumption };
+    });
+    return { title: '本轮行动时间线', steps };
   }
 
   async function retryEventReport() {

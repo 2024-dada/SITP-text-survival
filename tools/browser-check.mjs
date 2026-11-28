@@ -3,7 +3,7 @@
    运行：node tools/browser-check.mjs
    需要本机 Chrome；可用环境变量 CHROME 指定路径。 */
 import {spawn} from 'node:child_process';
-import {existsSync,mkdtempSync,rmSync} from 'node:fs';
+import {existsSync,mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -12,16 +12,20 @@ const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const CANDIDATES=[process.env.CHROME,'C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].filter(Boolean);
 const chrome=CANDIDATES.find(p=>existsSync(p));
 if(!chrome){console.error('未找到 Chrome/Edge；设置 CHROME 环境变量后重试。');process.exit(2);}
-const port=9333,profile=mkdtempSync(path.join(tmpdir(),'olorua-browser-'));
+let port;
+const profile=mkdtempSync(path.join(tmpdir(),'olorua-browser-'));
 const child=spawn(chrome,['--headless=new','--disable-gpu','--no-sandbox','--allow-file-access-from-files',
-  `--remote-debugging-port=${port}`,`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore'});
+  '--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore'});
 let pass=0,fail=0;const failures=[];
 const ok=(cond,msg)=>{if(cond){pass++;console.log('  ok  '+msg);}else{fail++;failures.push(msg);console.log('  FAIL '+msg);}};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function targets(){const r=await fetch(`http://127.0.0.1:${port}/json/list`);return r.json();}
 let page=null;
 for(let i=0;i<60&&!page;i++){
-  try{const list=await targets();page=list.find(t=>t.type==='page');}catch{}
+  try{
+    port=Number(readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split(/\r?\n/)[0]);
+    if(port){const list=await targets();page=list.find(t=>t.type==='page');}
+  }catch{}
   if(!page)await sleep(250);
 }
 if(!page){console.error('Chrome 调试端口未就绪');child.kill();process.exit(2);}
@@ -50,11 +54,18 @@ const mockSource=`(()=>{
       if(system.includes('本轮行动时间线模拟器')){
         const compact=system.includes('紧凑重试');type=compact?'plan-compact-retry':'plan';content=JSON.stringify({title:'营地观察',summary:'按研究者任务整理一个行动时段。',steps:[{time_label:'09:00',start_offset_minutes:0,duration_minutes:30,activity:'在营地观察周边',point_id:null,resource_id:null,probability_percent:100,success_result:'完成周边观察。',failure_result:'观察未完成。',assumption:'按当前营地位置和研究者任务估计。',point_reason:'从当前位置开始。'}]});
         if(window.__mockScenario==='planFailOnce'&&!compact&&!window.__mockPlanFailed){window.__mockPlanFailed=true;content='本次注入的计划格式失败';}
-        if(window.__mockScenario==='planFallback'){
+        if(['planFallback','planRows'].includes(window.__mockScenario)){
           const internalRecovery=payload.messages.some(item=>item.role==='user'&&String(item.content).includes('上次行动计划被截断'));
           if(compact||internalRecovery){content='';finish='stop';}
           else {content='{"title":"截断';finish='length';}
         }
+      }else if(system.includes('将研究者要求和求生者的行动方案')){
+        type='plan-compact-retry';
+        content=['planFallback','planRows'].includes(window.__mockScenario)?'{"steps":':JSON.stringify({steps:[['09:00',0,30,'营地观察','observer',null,100,'观察完成','观察未完成','按当前营地位置估计']]});
+      }else if(system.includes('把整个任务转为岛屿行动')){
+        type='plan-rows';
+        content='09:00|0|30|营地观察|observer|-|100|观察完成|观察未完成|按当前位置估计';
+        if(window.__mockScenario==='planRows')content+=String.fromCharCode(10)+'END';
       }else if(system.includes('你是研究者的模拟结果记录助手')){
         type='summary';
         const recovery=payload.messages.some(item=>item.role==='user'&&String(item.content).includes('上次报告续写为空'));
@@ -65,7 +76,7 @@ const mockSource=`(()=>{
         else if(window.__mockScenario==='summaryFailOnce'&&!window.__mockSummaryFailed){window.__mockSummaryFailed=true;content='本次注入的格式失败';}
         else content=['清晨的风从营地边吹过。','求生者完成了半小时周边观察；本轮模拟的身体负荷较轻。岛屿时钟推进30分钟，现有资源没有变化。'].join(String.fromCharCode(10));
       }else if(system.includes('请为研究者写求生者身体感受简报')){type='body-summary';content=window.__mockScenario==='bodySummaryEmpty'?'':'我在营地观察了半小时，身体负荷较轻；这是结合本轮行动作出的模拟感受。';
-      }else if(system.includes('你正在续写')&&(window.__mockScenario==='summaryLengthRecovered'||window.__mockScenario==='summaryAlwaysEmpty'||window.__mockScenario==='planFallback')){type='report-continuation';content='';}
+      }else if(system.includes('你正在续写')&&(window.__mockScenario==='summaryLengthRecovered'||window.__mockScenario==='summaryAlwaysEmpty'||['planFallback','planRows'].includes(window.__mockScenario))){type='report-continuation';content='';}
       window.__mockRequests.push({type,url:url.href,model:payload.model});
       return new Response(JSON.stringify({choices:[{message:{role:'assistant',content},finish_reason:finish}]}),{status:200,headers:{'Content-Type':'application/json'}});
     }
@@ -159,9 +170,13 @@ try{
   ok(planRetried?.requests.includes('plan-compact-retry')&&planRetried?.card.includes('营地观察'),'计划自动重试采用结构化结算数据并正常完成一次结算');
 
   await ev(`(()=>{window.__mockScenario='planFallback';const p=document.getElementById('agentRoundPrompt');p.value='再检查一次营地并描述周边。';p.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('runAgentRound').click();return true;})()`);
-  let planRecovered=null;for(let i=0;i<140;i++){planRecovered=await ev(`(()=>{const a=SurvivalAgent.getExperimentArchive();return {round:Number(document.getElementById('agentRoundCount').textContent),reports:document.querySelectorAll('#eventReportList .eventReportCard').length,hour:IslandApp.getWorldState().hour,pending:Boolean(a?.current.pending_report),points:document.getElementById('eventMarkers').childElementCount,card:document.querySelector('#eventReportList .eventReportCard')?.textContent||'',status:document.getElementById('eventReportStatus').textContent};})()`);if(planRecovered.round===6&&planRecovered.reports===6&&!planRecovered.pending)break;await sleep(100);}
-  ok(planRecovered?.reports===6&&Math.abs(planRecovered.hour-2.5)<1e-9&&!planRecovered.pending,'时间线续写与紧凑重试均为空时仍生成报告且不推进岛屿时钟');
-  ok(planRecovered?.card.includes('行动时间线在常规生成和精简重试后仍未形成')&&planRecovered?.card.includes('岛屿时间与资源未推进'),'计划失败兜底报告清楚说明未结算，不把行动写成事实');
+  const inspectPlan = `(()=>{const a=SurvivalAgent.getExperimentArchive();return {round:Number(document.getElementById('agentRoundCount').textContent),reports:document.querySelectorAll('#eventReportList .eventReportCard').length,hour:IslandApp.getWorldState().hour,pending:Boolean(a?.current.pending_report),points:document.querySelectorAll('#eventMarkers .eventMarker').length,retry:!document.getElementById('retryEventReport').hidden,agentRequests:window.__mockRequests.filter(request=>request.type==='agent').length};})()`;
+  let blocked;for(let i=0;i<140;i++){blocked=await ev(inspectPlan);if(blocked.round===6&&blocked.pending&&blocked.retry)break;await sleep(100);}
+  ok(blocked?.reports===5&&Math.abs(blocked.hour-2.5)<1e-9&&blocked.pending&&blocked.points===0,'三种计划均不完整时保留本轮，时钟与地图不提交');
+
+  await ev(`(()=>{window.__mockScenario='planRows';document.getElementById('retryEventReport').click();return true;})()`);
+  let planRecovered;for(let i=0;i<140;i++){planRecovered=await ev(inspectPlan);if(planRecovered.reports===6&&!planRecovered.pending)break;await sleep(100);}
+  ok(planRecovered?.reports===6&&Math.abs(planRecovered.hour-3)<1e-9&&!planRecovered.pending&&planRecovered.points===1&&planRecovered.agentRequests===blocked.agentRequests,'重试同轮只结算一次，并恢复地图点位，无需重跑 Agent');
 
   await send('Runtime.evaluate',{expression:"document.getElementById('exportExperimentPdf').click()",userGesture:true,returnByValue:true});
   let exportTarget=null;for(let i=0;i<30&&!exportTarget;i++){const list=await targets();exportTarget=list.find(t=>t.type==='page'&&t.title?.includes('OLORUA 完整实验记录'));if(!exportTarget)await sleep(100);}

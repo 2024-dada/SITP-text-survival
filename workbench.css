@@ -4,7 +4,7 @@ html{scroll-behavior:smooth;scroll-padding-top:80px}
 .transcriptTools{justify-content:flex-end;border-top:1px solid var(--line);padding-top:12px}.transcriptTools button{padding:7px 11px;font-size:12px}
 .connectionPrivacy{margin-top:10px;border-top:1px solid var(--line);padding-top:8px;color:var(--muted);font-size:12px}.connectionPrivacy summary{cursor:pointer}.connectionPrivacy p{max-width:100%;line-height:1.7}
 .agentChatMeta{font-variant-numeric:tabular-nums}.agentFailurePanel pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto}
-.eventReportList{max-height:85vh;overflow:auto;scrollbar-gutter:stable}.eventReportPane>.panelHead{position:sticky;top:52px;z-index:2;background:var(--white)}
+.eventReportList{max-height:85vh;overflow:auto;scrollbar-gutter:stable}.eventReportPane>.panelHead{background:var(--white)}
 .monitorFieldValue{font-variant-numeric:tabular-nums}.monitorFieldRow{min-height:42px}.observerSidebar{min-width:0}
 .workspaceNav{position:sticky;top:0;z-index:25;display:flex;align-items:center;gap:6px;padding:10px 0;margin-bottom:12px;background:var(--paper);border-bottom:1px solid var(--line);overflow-x:auto;white-space:nowrap}
 .workspaceNav b{margin-right:auto;font-size:12px;letter-spacing:1px;color:var(--muted)}
