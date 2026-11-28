@@ -376,6 +376,13 @@
       const payload = {
         model: settings.model, messages: requestMessages, max_tokens: maxTokens, stream: false
       };
+      if (new URL(settings.endpoint).hostname === 'api.deepseek.com' &&
+          /^(?:event_|reviewer_reflection_)/.test(systemId || '')) {
+        payload.thinking = { type: 'disabled' };
+        if (systemId === 'event_plan_compact' || (systemId === 'event_report_plan' && continuationCount === 0)) {
+          payload.response_format = { type: 'json_object' };
+        }
+      }
       if (requestTools && requestTools.length) payload.tools = requestTools;
       if (requestChoice) payload.tool_choice = requestChoice;
       const response = await fetchWithTimeout(settings.endpoint, {
@@ -1431,8 +1438,9 @@
       world.selected = point.slice();
       const startWeather = M.weather(world.hour, world.seed, point);
       const sceneBefore = M.observe ? M.observe(world, point) : null;
-      const randomDraw = Math.round(M.rnd(world.seed, `timeline:${pending.context.round}:${index}:${step.time_label}:${step.activity}`) * 10000) / 100;
-      const sampledSuccess = randomDraw < step.probability_percent;
+      const draw = M.rnd(world.seed, `timeline:${pending.context.round}:${index}:${step.time_label}:${step.activity}`);
+      const randomDraw = Math.floor(draw * 10000) / 100;
+      const sampledSuccess = draw * 100 < step.probability_percent;
       let success = sampledSuccess;
       let resultText = String(success ? step.success_result : step.failure_result).trim();
       let settlementText = '模拟估计，仅推进时间；未改变岛屿资源库存。';
@@ -1690,6 +1698,9 @@
         ? `本轮 Agent 结果已提交，报告/结算待完成：${active.pendingEventReport.error}`
         : '本轮 Agent 结果已提交，正在生成逐项时间线报告并准备结算。';
       pending.append(heading, message);
+      if (active.pendingEventReport.error && !active.pendingEventReport.plan && !busy) {
+        pending.append(manualEventPlanEditor(active));
+      }
       list.append(pending);
     }
     if (!reports.length && !active?.pendingEventReport) {
@@ -1878,6 +1889,10 @@
         ? '行动计划没有形成可结算数据；本轮仅整理已提交的研究者输入与 Agent 推理，岛屿时间和资源保持不变。'
         : '本轮没有安排行动时段；已整理研究者输入与 Agent 推理，岛屿时间和资源未变化。';
 
+      if (!pending.narrative && !settings) {
+        pending.narrative = fallbackEventNarrative(pending, plan, settlement, noActivitySettlement);
+        pending.narrativeRecoveryNote = '按研究者确认的时间线和本地结算记录整理。';
+      }
       if (!pending.narrative) {
         const resultContext = {
           round: pending.context.round,
@@ -1905,7 +1920,8 @@
       }
 
       let bodySummary = String(pending.narrative.body_summary || '').trim();
-      if (!bodySummary) {
+      if (!bodySummary && !settings) bodySummary = fallbackBodySummary(pending, settlement);
+      if (!bodySummary && settings) {
         try {
           bodySummary = await generateBodySummary(settings, pending, settlement?.summary || noActivitySettlement);
         } catch (error) {
@@ -2006,6 +2022,70 @@
         probability_percent: Number(probability), success_result, failure_result, assumption };
     });
     return { title: '本轮行动时间线', steps };
+  }
+
+  function manualEventPlanEditor(active) {
+    const pending = active.pendingEventReport;
+    const editor = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = '手动确认时间线并结算';
+    const label = document.createElement('label');
+    label.textContent = '每行填「行动｜耗时（分钟，15 的倍数）｜点位编号」。原地可省略点位。';
+    const input = document.createElement('textarea');
+    input.rows = 4;
+    input.placeholder = '观察营地｜15｜observer';
+    input.value = pending.manualPlanDraft || '';
+    input.addEventListener('input', () => { pending.manualPlanDraft = input.value; });
+    label.append(input);
+    const candidates = document.createElement('details');
+    const candidateTitle = document.createElement('summary');
+    candidateTitle.textContent = '查看可用点位编号';
+    const candidateList = document.createElement('p');
+    candidateList.textContent = pending.context.event_candidates.map(point => `${point.id} · ${point.name || '当前位置'}`).join(' / ');
+    candidates.append(candidateTitle, candidateList);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = '按此时间线结算';
+    const feedback = document.createElement('p');
+    feedback.setAttribute('role', 'status');
+    button.onclick = async () => {
+      if (busy || active.pendingEventReport !== pending) return;
+      let offset = 0;
+      try {
+        const rows = input.value.split(/\r?\n/).filter(row => row.trim());
+        if (!rows.length) throw new Error('请至少填写一项行动。');
+        const steps = rows.map(row => {
+          const fields = row.split(/[|｜]/).map(field => field.trim());
+          if (fields.length < 2 || fields.length > 3) throw new Error('请按行动、耗时、点位的格式填写。');
+          const [activity, duration, point = 'observer'] = fields;
+          const duration_minutes = Number(duration);
+          const step = {
+            activity, duration_minutes, start_offset_minutes: offset, time_label: `+${offset} 分钟`,
+            point_id: point || 'observer', resource_id: null, probability_percent: 100,
+            success_result: '已推进研究者指定的行动时段，具体收获待核。',
+            failure_result: '行动未完成。', assumption: '研究者确认模拟时段，仅结算时间和地点。'
+          };
+          offset += duration_minutes;
+          return step;
+        });
+        const plan = { title: '研究者确认的行动时间线', steps };
+        validateEventPlan(plan, pending.context);
+        pending.plan = plan;
+      } catch (error) {
+        feedback.textContent = error.message;
+        return;
+      }
+      setBusy(true);
+      try {
+        await continueEventReport(null, active);
+      } finally {
+        setBusy(false);
+        updateAgentInteractionControls();
+        renderEventReportPanel(active);
+      }
+    };
+    editor.append(summary, label, candidates, button, feedback);
+    return editor;
   }
 
   async function retryEventReport() {
