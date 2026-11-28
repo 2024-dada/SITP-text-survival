@@ -174,28 +174,31 @@
   button.addEventListener('click', () => {
     const data = globalThis.SurvivalAgent.getExperimentArchive();
     if (!data) { status.textContent = '请先开始一次实验会话。'; return; }
-    const page = window.open('', '_blank');
-    if (!page) { status.textContent = '请允许此网站打开导出窗口，再点击导出。'; return; }
-    const doc = page.document;
-    doc.title = 'OLORUA 完整实验记录';
-    const style = doc.createElement('style');
-    style.textContent = '@page{size:A4;margin:18mm}body{font:11pt/1.65 "Microsoft YaHei",sans-serif;color:#182b35;margin:24px}h1{font-size:24pt}h2{border-bottom:1px solid #aab8be;padding-bottom:6px;break-after:avoid}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:9pt/1.6 Consolas,"Microsoft YaHei",monospace}section{break-before:page}button{padding:12px 20px}@media print{button{display:none}body{margin:0}}';
-    doc.head.append(style);
-    const heading = doc.createElement('h1'); heading.textContent = 'OLORUA · 完整实验记录';
-    const intro = doc.createElement('p'); intro.textContent = `已完成 ${data.rounds.length} 轮 · 导出时间 ${new Date().toLocaleString()}。使用打印窗口的“另存为 PDF”保存。`;
-    const print = doc.createElement('button'); print.textContent = '打印 / 另存为 PDF'; print.onclick = () => page.print();
-    doc.body.append(heading, intro, print);
-    function section(title, value) {
-      const block = doc.createElement('section'); const h = doc.createElement('h2'); const pre = doc.createElement('pre');
-      h.textContent = title; pre.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2); block.append(h, pre); doc.body.append(block);
+    try {
+      const now = new Date();
+      const sections = [
+        ['OLORUA · 完整实验记录', `已提交 ${data.rounds.length} 轮 · 导出时间 ${now.toLocaleString()}`],
+        ['实验初始状态', data.initial],
+        ['参数单位对照', data.parameter_units],
+        ...data.rounds.map(round => [`第 ${round.round} 轮 · 输入、推理、参数与工具记录`, round]),
+        ['全部事件报告与状态结算', data.reports],
+        ['当前状态与完整命令记录', data.current]
+      ];
+      const url = URL.createObjectURL(globalThis.ExperimentPdf.build(sections, data));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `OLORUA-完整实验记录-${now.toISOString().slice(0, 19).replace(/:/g, '-')}.pdf`;
+      document.body.append(link);
+      try {
+        link.click();
+        status.textContent = '已发起 PDF 下载。';
+      } finally {
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      }
+    } catch (error) {
+      status.textContent = 'PDF 导出失败：' + error.message;
     }
-    section('实验初始状态', data.initial);
-    section('参数单位对照', data.parameter_units);
-    for (const round of data.rounds) section(`第 ${round.round} 轮 · 输入、推理、参数与工具记录`, round);
-    section('全部事件报告与状态结算', data.reports);
-    section('当前状态与完整命令记录', data.current);
-    status.textContent = '完整记录已打开，请在新窗口另存为 PDF。';
-    page.focus();
   });
   const nav = document.querySelector('.workspaceNav');
   nav.addEventListener('click', event => {

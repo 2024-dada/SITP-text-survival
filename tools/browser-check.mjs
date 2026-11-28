@@ -80,7 +80,7 @@ const mockSource=`(()=>{
       window.__mockRequests.push({type,url:url.href,model:payload.model});
       return new Response(JSON.stringify({choices:[{message:{role:'assistant',content},finish_reason:finish}]}),{status:200,headers:{'Content-Type':'application/json'}});
     }
-    if(url.protocol==='file:'||url.hostname==='127.0.0.1')return nativeFetch(input,init);
+    if(url.protocol==='blob:'||url.protocol==='file:'||url.hostname==='127.0.0.1')return nativeFetch(input,init);
     throw new Error('browser-check blocked a non-mock network request: '+url.host);
   };
 })()`;
@@ -178,20 +178,20 @@ try{
   let planRecovered;for(let i=0;i<140;i++){planRecovered=await ev(inspectPlan);if(planRecovered.reports===6&&!planRecovered.pending)break;await sleep(100);}
   ok(planRecovered?.reports===6&&Math.abs(planRecovered.hour-3)<1e-9&&!planRecovered.pending&&planRecovered.points===1&&planRecovered.agentRequests===blocked.agentRequests,'重试同轮只结算一次，并恢复地图点位，无需重跑 Agent');
 
-  await send('Runtime.evaluate',{expression:"document.getElementById('exportExperimentPdf').click()",userGesture:true,returnByValue:true});
-  let exportTarget=null;for(let i=0;i<30&&!exportTarget;i++){const list=await targets();exportTarget=list.find(t=>t.type==='page'&&t.title?.includes('OLORUA 完整实验记录'));if(!exportTarget)await sleep(100);}
-  ok(Boolean(exportTarget),'完整实验记录导出窗口打开');
-  if(exportTarget){
-    const pdfWs=new WebSocket(exportTarget.webSocketDebuggerUrl),pdfPending=new Map();let pdfId=0;
-    pdfWs.onmessage=e=>{const m=JSON.parse(e.data);if(m.id&&pdfPending.has(m.id)){const {res,rej}=pdfPending.get(m.id);pdfPending.delete(m.id);m.error?rej(new Error(JSON.stringify(m.error))):res(m.result);}};
-    await new Promise(r=>pdfWs.onopen=r);
-    const pdfSend=(method,params={})=>new Promise((res,rej)=>{const i=++pdfId;pdfPending.set(i,{res,rej});pdfWs.send(JSON.stringify({id:i,method,params}));});
-    const pdfText=await pdfSend('Runtime.evaluate',{expression:'document.body.innerText',returnByValue:true});
-    ok(pdfText.result?.value?.includes('第 6 轮')&&pdfText.result.value.includes('参数单位对照'),'导出页包含跨轮记录与参数单位表');
-    const pdfData=await pdfSend('Page.printToPDF',{printBackground:true});
-    ok((pdfData.data||'').length>1000,'浏览器成功生成完整记录 PDF 数据');
-    pdfWs.close();
-  }
+  const downloaded=await ev(`(async()=>{
+    const click=HTMLAnchorElement.prototype.click;
+    let name='',url='';
+    HTMLAnchorElement.prototype.click=function(){name=this.download;url=this.href;};
+    try{document.getElementById('exportExperimentPdf').click();}
+    finally{HTMLAnchorElement.prototype.click=click;}
+    if(!url)return null;
+    const response=await fetch(url);
+    const pdf=await response.text();
+    return {name,type:response.headers.get('Content-Type'),signature:pdf.startsWith('%PDF-'),
+      hasArchive:pdf.includes('(experiment.json)'),length:pdf.length};
+  })()`);
+  ok(downloaded?.name.endsWith('.pdf')&&downloaded.type==='application/pdf'&&downloaded.signature,'导出按钮在当前页直接发起 PDF 下载');
+  ok(downloaded?.hasArchive&&downloaded.length>1000,'PDF 包含完整实验 JSON 附件');
 
   const ms=await ev(`(()=>{const t=performance.now();for(let i=0;i<12;i++){position=[0+i,0];render();}return (performance.now()-t)/12;})()`);
   ok(ms<30,'浏览器渲染平均 '+ms.toFixed(2)+' ms（阈值30 ms）');
