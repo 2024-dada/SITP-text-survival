@@ -349,7 +349,13 @@
     });
   }
 
-  async function requestCompletion(settings, messages, tools, choice, systemId) {
+  async function requestCompletion(settings, messages, tools, choice, systemId, requestOptions = {}) {
+    const requestMaxTokens = Number.isFinite(requestOptions.maxTokens)
+      ? Math.max(1, Math.min(MAX_COMPLETION_TOKENS, Math.floor(requestOptions.maxTokens)))
+      : MAX_COMPLETION_TOKENS;
+    const continuationMaxTokens = Number.isFinite(requestOptions.continuationTokens)
+      ? Math.max(1, Math.min(CONTINUATION_COMPLETION_TOKENS, Math.floor(requestOptions.continuationTokens)))
+      : CONTINUATION_COMPLETION_TOKENS;
     const reportMode = systemId === 'event_report_plan' ? 'json'
       : ['event_report_summary', 'event_body_summary'].includes(systemId) ? 'text' : '';
     if (reportMode === 'json') messages = messages.concat({ role: 'user', content: '这是程序读取的行动计划数据。请只返回完整、紧凑且可解析的 JSON，不输出思考过程或 Markdown；保留研究者明确提出的全部行动时段，字段内容简洁但不要遗漏结算所需信息。' });
@@ -382,7 +388,7 @@
       return { message, finishReason: data.choices[0].finish_reason || '' };
     }
 
-    let current = await send(messages, tools, choice, MAX_COMPLETION_TOKENS);
+    let current = await send(messages, tools, choice, requestMaxTokens);
     const firstToolCalls = Array.isArray(current.message.tool_calls) ? current.message.tool_calls : [];
     const firstOutput = [
       typeof current.message.content === 'string' ? current.message.content : '',
@@ -404,7 +410,7 @@
         role: 'user',
         content: '上一条回复在工具调用参数中达到单次输出上限。网页已保存原始片段；这条未完整的工具调用没有执行。请不要重发工具调用或声称它已成功；只根据已经完整收到的信息，简洁给出可支持的结论。依赖未执行计算的信息请明确标注未知/待核。'
       });
-      current = await send(recoveryMessages, null, null, CONTINUATION_COMPLETION_TOKENS);
+      current = await send(recoveryMessages, null, null, continuationMaxTokens);
       const recoveryText = typeof current.message.content === 'string' ? current.message.content : '';
       recordAgentResponse(systemId, recoveryText, current.finishReason, '工具调用截断后的安全总结');
       if (Array.isArray(current.message.tool_calls) && current.message.tool_calls.length) {
@@ -430,7 +436,7 @@
             '请直接从截断处继续；不要重新开头或复述。'
           ].filter(Boolean).join('\n\n') }
         ];
-        current = await send(continuationMessages, null, null, CONTINUATION_COMPLETION_TOKENS);
+        current = await send(continuationMessages, null, null, continuationMaxTokens);
         const next = typeof current.message.content === 'string' ? current.message.content : '';
         recordAgentResponse(systemId, next, current.finishReason, '续写 ' + continuationCount);
         if (next) {
@@ -453,7 +459,7 @@
               ? '上次行动计划被截断且续写为空。请重新检查输入，只返回完整紧凑 JSON；保留所有明确安排的时段及结算所需字段。'
               : '上次报告续写为空。请重新依据原始输入直接写一份完整、精炼的中文报告；可自由组织段落或小标题，不输出 JSON，不套固定栏目。';
             reportRecoveryUsed = true;
-            const recovered = await send(messages.concat({ role: 'user', content: recoveryInstruction }), null, null, MAX_COMPLETION_TOKENS);
+            const recovered = await send(messages.concat({ role: 'user', content: recoveryInstruction }), null, null, requestMaxTokens);
             const recoveredText = typeof recovered.message.content === 'string' ? recovered.message.content : '';
             recordAgentResponse(systemId, recoveredText, recovered.finishReason, reportMode === 'json' ? '行动计划紧凑重建' : '自由体报告重写');
             if (recoveredText.trim()) {
@@ -1588,17 +1594,18 @@
     const survivor = (pending.context.agent_outputs || []).find(agent => agent.agent === '求生者 Agent');
     const statement = String(body.after_statement || survivor?.statement || '').trim();
     const steps = settlement?.steps || pending.plan?.steps || [];
-    if (statement) return `我的状态描述：${statement}${(body.parameter_changes || []).length ? `；本轮记录了 ${(body.parameter_changes || []).length} 项人体参数变化，具体数值见下方。` : ''}`.slice(0, 260);
-    if (!steps.length) return '本轮没有安排具体行动；身体感受按求生者 Agent 已提交的状态描述记录。';
-    const activities = [...new Set(steps.map(step => String(step.activity || '').trim()).filter(Boolean))].slice(0, 3);
+    const safeSelfReport = statement.length <= 160
+      && !/[0-9０-９%％]/.test(statement)
+      && !/(参数|数值|单位|指标|计划|资源量|渔获|工具|模拟推演)/.test(statement)
+      ? statement : '';
+    if (!steps.length) return safeSelfReport ? `求生者自述：${safeSelfReport}` : '本轮没有安排具体行动，暂无新的身体感受记录。';
     const minutes = settlement?.durationMinutes || steps.reduce((sum, step) => sum + (Number(step.durationMinutes || step.duration_minutes) || 0), 0);
     const physicalEffort = steps.some(step => /行走|前往|寻找|采集|捕鱼|捕捞|搬|搭建|砍|攀|爬|收集|搬运|处理|生火/.test(String(step.activity || '')));
-    const activityText = activities.join('、') || '本轮行动';
     const sensation = physicalEffort
-      ? '结合活动内容和时长推测，连续行动后可能会有些疲惫，需要休息并留意补水。'
-      : '结合活动内容和时长推测，本轮身体负荷较轻。';
-    const changes = (body.parameter_changes || []).length;
-    return `这轮我进行了${activityText}，累计行动约 ${minutes} 分钟。${sensation}${changes ? `人体参数记录了 ${changes} 项变化，具体数值见下方。` : ''}`.slice(0, 260);
+      ? '结合活动内容推测，连续行动后可能会有些疲惫，适合休息并留意补水。'
+      : '结合活动内容推测，本轮身体负荷较轻。';
+    const activityText = physicalEffort ? '进行了体力活动' : '以较轻的观察活动为主';
+    return `${safeSelfReport ? `求生者自述：${safeSelfReport}。` : ''}本轮${activityText}，持续约 ${minutes} 分钟。${sensation}`;
   }
 
   function fallbackEventNarrative(pending, plan, settlement, noActivitySettlement) {
@@ -1619,8 +1626,8 @@
     const afterScene = String(last?.sceneAfter || beforeScene).trim();
     return {
       human_summary: outcomes.length
-        ? outcomes.join('；').slice(0, 1200)
-        : String(plan.summary || pending.context.researcher_prompt || '本轮 Agent 推理已提交，没有安排具体行动时段。').slice(0, 500),
+        ? outcomes.join('；')
+        : String(plan.summary || pending.context.researcher_prompt || '本轮 Agent 推理已提交，没有安排具体行动时段。'),
       body_summary: fallbackBodySummary(pending, settlement),
       before_scene: beforeScene,
       after_scene: afterScene,
@@ -1640,11 +1647,11 @@
       event_status: eventStatus || '本轮没有确认具体行动事件。'
     };
     const response = await requestCompletion(settings, [
-      { role: 'system', content: '请为研究者写求生者身体感受简报。使用第一人称、自然中文，根据人体 Agent 已提交的状态描述、参数及前后变化，并结合本轮实际行动时长、天气与结果来表达。不要按固定句式或固定栏目填空，可自由组织语言。没有具体身体参数时，可以根据已知活动给出定性模拟推测，并明确这是推测；不要捏造体征数值或医学结论，不要把物品采集写成已进食/饮水。优先写出最有意义的感受，260字以内。这段简报只显示在事件报告，不写入 Agent 状态、对话历史或下一轮输入；直接输出纯文本，不使用 Markdown 标记。' },
+      { role: 'system', content: '请为研究者写求生者身体感受简报。使用第一人称、自然中文，根据人体 Agent 已提交的状态和参数前后变化，并结合本轮实际行动时长、天气与结果来推断身体感受。参数只用于推断感受：不要输出任何参数名称、数值、单位或参数变化清单，也不要复述详细计划、工具清单、物资数量或渔获估算；重点写本轮真实结算的行动带来的主观感受及必要原因。不要按固定句式或固定栏目填空，可自由组织语言；没有具体身体参数时，可依据活动给出定性模拟推测并明确这是推测，不要捏造体征数值或医学结论，不要把物品采集写成已进食/饮水。优先写出最有意义的感受，表达完整即可，不要在句中截断。这段简报只显示在事件报告，不写入 Agent 状态、对话历史或下一轮输入；直接输出纯文本，不使用 Markdown 标记。' },
       { role: 'user', content: JSON.stringify(context) }
     ], null, null, 'event_body_summary');
     const parsed = parseFlexibleNarrative(response.content, '人体感受报告');
-    const summary = String(parsed.body_summary || parsed.human_summary || parsed.report_text || '').trim().slice(0, 420);
+    const summary = String(parsed.body_summary || parsed.human_summary || parsed.report_text || '').trim();
     if (!summary) throw new Error('事件报告没有返回有效的人体感受，请重试报告。');
     pending.bodySummary = summary;
     return summary;
@@ -1668,15 +1675,6 @@
     text.textContent = String(value);
     item.append(heading, text);
     parent.append(item);
-  }
-
-  function reportBodyChanges(report) {
-    if (!report.bodyChanges.length) return '';
-    const changes = report.bodyChanges.map(change => {
-      const before = change.before === null ? '新增' : `${change.before} ${change.unit} → `;
-      return `${change.code}：${before}${change.after} ${change.unit}`;
-    }).join('；');
-    return changes;
   }
 
   function renderEventReportPanel(active, statusText) {
@@ -1754,7 +1752,6 @@
       reportField(card, 'AI 事件报告', report.humanSummary);
       reportField(card, '人体 Agent 感受', report.bodySummary);
       reportField(card, '报告整理', report.recoveryNote);
-      reportField(card, '人体框架参数变化', reportBodyChanges(report));
       reportField(card, '本轮状态结算', report.settlementSummary);
       reportField(card, '事件前看到的景象', report.beforeScene);
       reportField(card, '事件后看到的景象', report.afterScene);
@@ -1878,14 +1875,13 @@
           timeline_results: settlement?.steps || [],
           state_settlement: settlement?.summary || noActivitySettlement,
           plan_recovery_note: pending.planRecoveryNote || '',
-          body: pending.context.body,
           scene_before_evidence: pending.context.current_scene,
           scene_after_evidence: settlement && M.observe ? M.observe(settlement.world, settlement.position)?.role || '' : pending.context.current_scene,
           island_agent_changes: pending.context.state_changes
         };
         try {
           const response = await requestCompletion(settings, [
-          { role: 'system', content: '你是研究者的模拟结果记录助手。请基于输入，为本轮写一份准确、具体、易读的中文事件报告。报告格式由你根据本轮内容决定：可以用自然段、叙事、小标题或简短列表；不必套固定框架、固定字段或预设顺序，也不要为了填栏目重复信息。可自由叙述，优先突出本轮关键发现与结果；小标题用纯文本，不加 Markdown 标记。把研究者任务、所有 Agent 已提交的关键推理、实际执行的行动与抽样结果、行动前后景象、求生者身体参数变化及其主观感受，以及天气/资源/岛屿状态的实际变化自然地组织起来。先抓住本轮最有意义的事情，避免机械罗列。计划失败或没有行动时，说明已保存的推理内容和未完成的部分；绝不能把未确认行动写成已发生，也不能虚构成功率、时长、体征数值、资源变化或天气变化。估计可用于模拟叙述，但要与已提交参数和结算事实区分，不能伪称实地观测或实测值。身体感受可结合已给人体参数和活动作定性表达，不得编造数值或医学结论；取到物品不等于已经进食或饮水。报告只显示在本轮报告，不写回 Agent 状态或下一轮输入。直接输出纯文本报告，不输出 JSON、Markdown 标记或解释写作过程。' },
+          { role: 'system', content: '你是研究者的模拟结果记录助手。请基于输入，为本轮写一份准确、具体、易读的中文事件报告。报告格式由你根据本轮内容决定：可以用自然段、叙事、小标题或简短列表；不必套固定框架、固定字段或预设顺序，也不要为了填栏目重复信息。可自由叙述，优先突出本轮关键发现与结果；小标题用纯文本，不加 Markdown 标记。把研究者任务、所有 Agent 已提交的关键推理、实际执行的行动与抽样结果、行动前后景象，以及天气/资源/岛屿状态的实际变化自然地组织起来。人体感受由单独的简报呈现；如需提及求生者状态，只作简短的人话描述，不列参数名称、数值、单位或参数变化清单。先抓住本轮最有意义的事情，避免机械罗列。计划失败或没有行动时，说明已保存的推理内容和未完成的部分；绝不能把未确认行动写成已发生，也不能虚构成功率、时长、体征数值、资源变化或天气变化。估计可用于模拟叙述，但要与已提交参数和结算事实区分，不能伪称实地观测或实测值。不要捏造体征数值或医学结论；取到物品不等于已经进食或饮水。报告只显示在本轮报告，不写回 Agent 状态或下一轮输入。直接输出纯文本报告，不输出 JSON、Markdown 标记或解释写作过程。' },
           { role: 'user', content: JSON.stringify(resultContext) }
           ], null, null, 'event_report_summary');
           pending.narrative = parseFlexibleNarrative(response.content, '事件简报');
@@ -1896,7 +1892,7 @@
         }
       }
 
-      let bodySummary = String(pending.narrative.body_summary || '').trim().slice(0, 420);
+      let bodySummary = String(pending.narrative.body_summary || '').trim();
       if (!bodySummary) {
         try {
           bodySummary = await generateBodySummary(settings, pending, settlement?.summary || noActivitySettlement);
@@ -1923,7 +1919,7 @@
         resultText: timelineResult,
         durationMinutes: settlement?.durationMinutes || 0,
         humanSummary: String(pending.narrative.human_summary || plan.summary || ''),
-        bodySummary, bodyChanges: pending.context.body.parameter_changes,
+        bodySummary,
         recoveryNote: [pending.planRecoveryNote, pending.narrativeRecoveryNote].filter(Boolean).join('\n'),
         steps: settlement?.steps || [],
         beforeScene: String(pending.narrative.before_scene || settlement?.steps?.[0]?.sceneBefore || pending.context.current_scene || ''),
@@ -2486,6 +2482,105 @@
   updateActionFields();
   updateAgentInteractionControls();
   keepIslandObserverReadOnly();
+  function sanitizeReviewerText(value, limit = 1200) {
+    let text = String(value ?? '');
+    const key = el('aiApiKey').value.trim();
+    if (key) text = text.split(key).join('[已隐藏]');
+    return text
+      .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [已隐藏]')
+      .replace(/\b((?:api[-_ ]?key|access[_-]?token|refresh[_-]?token|token|secret|password|credential)\b\s*["']?\s*[:=]\s*["']?)[^\s"'`,;]+/gi, '$1[已隐藏]')
+      .replace(/\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{16,}|mgk_[A-Za-z0-9_-]{16,}|gsk_[A-Za-z0-9_-]{16,})\b/g, '[已隐藏]')
+      .slice(0, limit);
+  }
+
+  function sampledReviewRounds(rounds, limit = 4) {
+    if (rounds.length <= limit) return rounds;
+    return Array.from({ length: limit }, (_, index) => rounds[Math.round(index * (rounds.length - 1) / (limit - 1))]);
+  }
+
+  function reviewerEvidenceForAgent(active, systemId) {
+    const initialSystem = active.frameworkAnchor.systems.find(item => item.system_id === systemId);
+    const currentSystem = active.frame.systems.find(item => item.system_id === systemId);
+    const rule = String(initialSystem?.rule || '')
+      .replace(/DATA_JSON_BEGIN[\s\S]*?DATA_JSON_END/g, '[本规则内嵌数据快照已省略]')
+      .trim();
+    const roundEvidence = active.archiveRounds.map(round => {
+      const inference = round.inference || {};
+      const result = (inference.results || []).find(item => item.systemId === systemId);
+      if (!result) return null;
+      const changes = (inference.commandLog || [])
+        .filter(command => command.system_id === systemId && command.change)
+        .filter(command => !/api.?key|token|secret|password|credential/i.test(String(command.change.field || '')))
+        .slice(0, 5)
+        .map(command => `${command.change.field || command.type}；理由：${sanitizeReviewerText(command.change.reason || '', 160)}`);
+      const toolNames = [...new Set((result.toolTrace || []).map(item => String(item.name || '')).filter(Boolean))].slice(0, 10);
+      return {
+        round: round.round,
+        researcherTask: sanitizeReviewerText(round.researcher_input || '（本轮未填写额外任务）', 260),
+        agentOutput: sanitizeReviewerText(result.finalText || '（没有公开补充发言）', 1100),
+        tools: toolNames,
+        changes
+      };
+    }).filter(Boolean);
+    const sampled = sampledReviewRounds(roundEvidence);
+    const lines = [
+      `实验已提交轮数：${active.archiveRounds.length}。以下是从本次归档中均匀选取的最多 ${sampled.length} 轮证据节选；外部质检时仍须检查完整 PDF。`,
+      `Agent：${displayAgentName(systemId)}（${systemId}）`,
+      `本 Agent 规则（已省略内嵌大型数据快照）：\n${sanitizeReviewerText(rule, 2600)}`,
+      `当前 statement：${sanitizeReviewerText(currentSystem?.statement || '', 600)}`,
+      '本次记录节选：'
+    ];
+    sampled.forEach(item => {
+      lines.push(`第 ${item.round} 轮｜研究者输入：${item.researcherTask}\nAgent公开输出：${item.agentOutput}\n调用工具：${item.tools.join('、') || '无'}\n自身状态修改及理由：${item.changes.join('；') || '无'}`);
+    });
+    return lines.join('\n\n');
+  }
+
+  async function generateReviewerAgentPrompts(onProgress = () => {}) {
+    const active = interactionSession;
+    if (!active || !active.archiveRounds.length) throw new Error('请先完成至少一轮 Agent 推演，再生成本次专项质检提示词。');
+    if (busy) throw new Error('当前还有实验请求正在处理；请等它完成后再生成质检提示词。');
+    const settings = getSettings();
+    const systems = active.frameworkAnchor.systems;
+    const items = [];
+    const omitted = [];
+    const errors = [];
+    setBusy(true);
+    try {
+      for (let index = 0; index < systems.length; index += 1) {
+        const system = systems[index];
+        const agentName = displayAgentName(system.system_id);
+        onProgress({ completed: index, total: systems.length, agentName });
+        const messages = [
+          {
+            role: 'system',
+            content: '你正在代表本次实验中的一个 Agent 做事后复盘。只依据随附的本 Agent 规则节选、本次已提交轮次的公开发言、工具名称和自身状态修改记录，判断是否存在明确的困难、反思、不确定点、规则冲突或值得专项复核的问题。不要输出隐藏思维链，不要把没有出现的困难编造成事实。若没有具体、可由记录支持的复盘内容，必须返回 has_reflection=false。若有，请用简短自然中文概述依据，并写一段给外部质检员的专项提示词，要求其结合完整 PDF 和全局网站运作说明，针对本 Agent 的规则/工具使用/状态修改提出可执行的框架优化建议；提示词不能取代全局质检，也不能要求自动改代码。只返回包含 JSON 布尔值 has_reflection、字符串 reflection 和字符串 reviewer_prompt 的 JSON 对象；无反思时 reflection 与 reviewer_prompt 都为空字符串。'
+          },
+          { role: 'user', content: reviewerEvidenceForAgent(active, system.system_id) }
+        ];
+        try {
+          const response = await requestCompletion(settings, messages, null, null, 'reviewer_reflection_' + system.system_id, { maxTokens: 650, continuationTokens: 650 });
+          const parsed = parseModelJson(response.content, agentName + '专项复盘');
+          const reflection = sanitizeReviewerText(parsed.reflection || '', 700).trim();
+          const reviewerPrompt = sanitizeReviewerText(parsed.reviewer_prompt || '', 1800).trim();
+          if (parsed.has_reflection === true && reflection && reviewerPrompt.length >= 30) {
+            items.push({ systemId: system.system_id, agentName, reflection, reviewerPrompt });
+          } else {
+            omitted.push(agentName);
+          }
+        } catch (error) {
+          errors.push(agentName);
+        }
+      }
+    } finally {
+      setBusy(false);
+      updateFrameworkControls();
+      updateAgentInteractionControls();
+    }
+    onProgress({ completed: systems.length, total: systems.length, agentName: '' });
+    return { items, omitted, errors, roundCount: active.archiveRounds.length, agentCount: systems.length };
+  }
+
   function getExperimentArchive() {
     if (!interactionSession) return null;
     const active = interactionSession;
@@ -2505,6 +2600,6 @@
     }
     return redact(archive);
   }
-  G.SurvivalAgent = Object.freeze({ refreshAfterIslandRender, getMonitorSnapshot, getExperimentArchive });
+  G.SurvivalAgent = Object.freeze({ refreshAfterIslandRender, getMonitorSnapshot, getExperimentArchive, generateReviewerAgentPrompts });
   new MutationObserver(refreshAfterIslandRender).observe(el('nearby'), { childList: true });
 })(globalThis);
