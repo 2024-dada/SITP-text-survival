@@ -123,6 +123,11 @@ $('nextRain').onclick=()=>{pause();let target=null;for(let i=1;i<=24*60*4;i++){l
 function setEventMarkers(markers=[]){
  const layer=$('eventMarkers'),controls=$('eventPointControls'),valid=markers.filter(item=>Number.isFinite(Number(item.east_m))&&Number.isFinite(Number(item.north_m)));
  layer.replaceChildren();controls.replaceChildren();
+ const locate=$('locateEvent');
+ locate.disabled=!valid.length;
+ locate.onclick=null;
+ locate.textContent='定位本轮行动';
+ locate.title=valid.length?'定位地图上的本轮行动':'本轮暂无行动点位';
  if(!valid.length){controls.hidden=true;focusedEventMarkerIndex=-1;return;}
  controls.hidden=false;
  const label=document.createElement('strong');label.textContent='定位模拟点位';controls.append(label);
@@ -130,8 +135,6 @@ function setEventMarkers(markers=[]){
  const latest=valid.map((item,index)=>({item,index})).filter(({item})=>item.round===latestRound);
  const points=latest.map(({item})=>[Number(item.east_m),-Number(item.north_m)]);
  const distinct=new Set(points.map(point=>point.join(','))).size;
- const locate=document.createElement('button');
- locate.type='button';
  locate.textContent='定位第 '+latestRound+' 轮'+(distinct>1?'轨迹':'地点');
  locate.onclick=()=>{
   if(distinct===1){
@@ -151,7 +154,6 @@ function setEventMarkers(markers=[]){
   }
   $('map').scrollIntoView({block:'nearest'});
  };
- controls.append(locate);
  if(distinct>1){
   const coordinates=points.map(point=>point.join(',')).join(' ');
   layer.append(
