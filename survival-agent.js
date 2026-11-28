@@ -1762,7 +1762,8 @@
       const point = active.pendingEventReport.context.event_candidates.find(candidate => candidate.id === step.point_id);
       return point ? [{ ...point, round: active.pendingEventReport.context.round, title: `待结算 · ${step.time_label} ${step.activity}` }] : [];
     });
-    const markers = [...(active?.eventMarkers || []), ...previewMarkers];
+    const mapRound = active?.mapRound ?? active?.round;
+    const markers = [...(active?.eventMarkers || []), ...previewMarkers].filter(marker => marker.round === mapRound);
     G.IslandApp?.setEventMarkers(markers);
     el('eventMapCount').textContent = `${markers.length} 个点位${previewMarkers.length ? '（含待结算）' : ''}`;
     el('eventReportStatus').textContent = statusText || (active?.pendingEventReport?.error
@@ -1859,8 +1860,8 @@
         const point = pending.context.event_candidates.find(candidate => candidate.id === step.point_id);
         return point ? [{ ...point, round: pending.context.round, title: `待结算 · ${step.time_label} ${step.activity}` }] : [];
       });
-      G.IslandApp?.setEventMarkers([...active.eventMarkers, ...previews]);
-      el('eventMapCount').textContent = `${active.eventMarkers.length + previews.length} 个点位（含待结算）`;
+      G.IslandApp?.setEventMarkers(previews);
+      el('eventMapCount').textContent = `${previews.length} 个点位${previews.length ? '（待结算）' : ''}`;
       const settlement = plan.steps.length ? prepareTimelineSettlement(active, pending) : null;
       const noActivitySettlement = pending.planRecoveryNote
         ? '行动计划没有形成可结算数据；本轮仅整理已提交的研究者输入与 Agent 推理，岛屿时间和资源保持不变。'
@@ -2036,6 +2037,9 @@
     roundCalls = 0;
     if (!retry) roundResponseLedger = new Map();
     const roundNumber = active.round + 1;
+    active.mapRound = roundNumber;
+    G.IslandApp?.setEventMarkers([]);
+    el('eventMapCount').textContent = '0 个点位';
     lastAgentRoundState = '第 ' + roundNumber + ' 轮并行推理中';
     lastAgentRoundError = '';
     setAgentStatus('第 ' + roundNumber + ' 轮并行推理中', '');

@@ -126,10 +126,43 @@ function setEventMarkers(markers=[]){
  if(!valid.length){controls.hidden=true;focusedEventMarkerIndex=-1;return;}
  controls.hidden=false;
  const label=document.createElement('strong');label.textContent='定位模拟点位';controls.append(label);
+ const latestRound=valid[valid.length-1].round;
+ const latest=valid.map((item,index)=>({item,index})).filter(({item})=>item.round===latestRound);
+ const points=latest.map(({item})=>[Number(item.east_m),-Number(item.north_m)]);
+ const distinct=new Set(points.map(point=>point.join(','))).size;
+ const locate=document.createElement('button');
+ locate.type='button';
+ locate.textContent='定位第 '+latestRound+' 轮'+(distinct>1?'轨迹':'地点');
+ locate.onclick=()=>{
+  if(distinct===1){
+   focusEventPoint(points[0][0],-points[0][1],latest[latest.length-1].index);
+  }else{
+   if(mapPan)finishMapPan(null,true);
+   const xs=points.map(([x])=>x),ys=points.map(([,y])=>y);
+   const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...ys),bottom=Math.max(...ys);
+   const scale=Math.max(.25,(right-left+96)/fullMapView.width,(bottom-top+96)/fullMapView.height);
+   const width=fullMapView.width*scale,height=fullMapView.height*scale;
+   $('map').setAttribute('viewBox',`${(left+right-width)/2} ${(top+bottom-height)/2} ${width} ${height}`);
+   $('zoomLevel').textContent=(1/scale).toFixed(1)+'×';
+   updateMapCursor();
+   focusedEventMarkerIndex=-1;
+   layer.querySelectorAll('.eventMarkerFocused').forEach(marker=>marker.classList.remove('eventMarkerFocused'));
+   controls.querySelectorAll('[data-event-point-index]').forEach(button=>button.setAttribute('aria-pressed','false'));
+  }
+  $('map').scrollIntoView({block:'nearest'});
+ };
+ controls.append(locate);
+ if(distinct>1){
+  const coordinates=points.map(point=>point.join(',')).join(' ');
+  layer.append(
+   svg('polyline',{points:coordinates,fill:'none',stroke:'#fff8eb','stroke-width':6,'vector-effect':'non-scaling-stroke','stroke-linejoin':'round'}),
+   svg('polyline',{points:coordinates,fill:'none',stroke:'#c52232','stroke-width':3,'vector-effect':'non-scaling-stroke','stroke-linejoin':'round'})
+  );
+ }
  for(const [index,item] of valid.entries()){
   const east=Number(item.east_m),north=Number(item.north_m),round=Number(item.round),title=String(item.title||'行动点位'),time=title.match(/\d{1,2}:\d{2}/)?.[0];
   const group=svg('g',{transform:`translate(${east},${-north})`,class:`eventMarker${index===focusedEventMarkerIndex?' eventMarkerFocused':''}`});
-  group.append(svg('title',{},`${index+1}. ${title} · ${item.name||''}`),svg('circle',{r:16,fill:'#a74932',stroke:'#fff8eb','stroke-width':3}),svg('circle',{r:19,fill:'none',stroke:'#a74932','stroke-width':1.5,opacity:.75}),svg('text',{y:4,'text-anchor':'middle','font-size':11,'font-weight':700,fill:'#fff'},String(index+1)));
+  group.append(svg('title',{},`${index+1}. ${title} · ${item.name||''}`),svg('circle',{r:16,fill:'#c52232',stroke:'#fff8eb','stroke-width':3}),svg('circle',{r:19,fill:'none',stroke:'#c52232','stroke-width':1.5,opacity:.75}),svg('text',{y:4,'text-anchor':'middle','font-size':11,'font-weight':700,fill:'#fff'},distinct>1?String(index+1):''));
   layer.append(group);
   const button=document.createElement('button');
   button.type='button';button.className='eventPointButton';
