@@ -181,3 +181,8 @@ DeepSeek 官网接口的行动计划与报告整理使用非思考模式，结�
 ## v4.11.15 实验 PDF 直接下载（本地待推送）
 
 实验 PDF 改为浏览器直接下载。PDF 正文包含原有导出章节，附带脱敏后的完整实验 JSON。
+
+
+## v4.11.16 ModelGo 直连提示（本地待推送）
+
+从 Pages origin 探测 ModelGo 官方网关，模型列表和 Chat Completions 的无密钥 OPTIONS 预检均返回 HTTP 405。前端只显示一条错误，对官方 ModelGo 直连解释跨域限制，保留当前地址和密钥配置。

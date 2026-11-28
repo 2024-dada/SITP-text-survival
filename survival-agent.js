@@ -235,6 +235,9 @@
     } catch (error) {
       const roundNote = label === '模型调用' ? '此轮状态没有提交；可以重试同一轮。' : '可以稍后重试。';
       if (error.name === 'AbortError') throw new Error(label + '等待超过90秒，' + roundNote);
+      if (['api.modelgo.ai', 'api.modelgo.com'].includes(new URL(url).hostname)) {
+        throw new Error(label + '未能连接 ModelGo。该网关目前拒绝本站的浏览器跨域预检，手填模型也无法解决聊天请求。请切换到支持网页直连的服务，或填写你已有的同源转发地址。');
+      }
       throw new Error(label + '网络连接失败。请检查网络和服务商跨域设置；' + roundNote + '浏览器提示：' + error.message);
     } finally {
       clearTimeout(timer);
@@ -701,9 +704,10 @@
       status('读到 ' + (select.options.length - 1) + ' 个模型。列表不代表当前 Key 一定有调用权限。', 'ok');
     } catch (error) {
       if (query !== modelQuery) return;
-      el('providerStatus').textContent = error.message || String(error);
+      el('providerStatus').textContent = '';
       select.replaceChildren(new Option('未获取到模型，可手动填写', ''));
-      status(error.message + ' 仍可手动填写模型名。', 'error');
+      const message = error.message || String(error);
+      status(message.includes('拒绝本站的浏览器跨域预检') ? message : message + ' 仍可手动填写模型名。', 'error');
     } finally {
       emitMonitorUpdate();
     }
