@@ -8,6 +8,10 @@
   exportActions.className = 'exportActions';
   button.after(exportActions);
   exportActions.append(button);
+  const rawArchiveButton = document.createElement('button');
+  rawArchiveButton.type = 'button';
+  rawArchiveButton.textContent = '下载完整原始记录（JSON）';
+  exportActions.append(rawArchiveButton);
   const reviewerButton = document.createElement('button');
   reviewerButton.id = 'copyReviewerPrompt';
   reviewerButton.type = 'button';
@@ -166,40 +170,39 @@
   const exportStatus = () => {
     const running = document.getElementById('runAgentRound').disabled && document.getElementById('endAgentInteraction').disabled;
     button.disabled = running;
+    rawArchiveButton.disabled = running;
     status.textContent = `${document.getElementById('agentRoundCount').textContent} 轮已提交 · ${runStatus.textContent} · 刷新或重置前请导出`;
   };
   new MutationObserver(exportStatus).observe(runStatus, { childList: true, characterData: true, subtree: true });
   new MutationObserver(exportStatus).observe(document.getElementById('runAgentRound'), { attributes: true, attributeFilter: ['disabled'] });
   new MutationObserver(exportStatus).observe(document.getElementById('endAgentInteraction'), { attributes: true, attributeFilter: ['disabled'] });
-  button.addEventListener('click', () => {
+  function downloadArchive(format) {
     const data = globalThis.SurvivalAgent.getExperimentArchive();
     if (!data) { status.textContent = '请先开始一次实验会话。'; return; }
     try {
       const now = new Date();
-      const sections = [
-        ['OLORUA · 完整实验记录', `已提交 ${data.rounds.length} 轮 · 导出时间 ${now.toLocaleString()}`],
-        ['实验初始状态', data.initial],
-        ['参数单位对照', data.parameter_units],
-        ...data.rounds.map(round => [`第 ${round.round} 轮 · 输入、推理、参数与工具记录`, round]),
-        ['全部事件报告与状态结算', data.reports],
-        ['当前状态与完整命令记录', data.current]
-      ];
-      const url = URL.createObjectURL(globalThis.ExperimentPdf.build(sections, data));
+      const pdf = globalThis.ExperimentPdf;
+      const file = format === 'pdf'
+        ? pdf.build(pdf.reviewSections(data, now), data)
+        : new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(file);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `OLORUA-完整实验记录-${now.toISOString().slice(0, 19).replace(/:/g, '-')}.pdf`;
+      link.download = `OLORUA-${format === 'pdf' ? '实验审查记录' : '完整原始记录'}-${now.toISOString().slice(0, 19).replace(/:/g, '-') }.${format}`;
       document.body.append(link);
       try {
         link.click();
-        status.textContent = '已发起 PDF 下载。';
+        status.textContent = format === 'pdf' ? '已发起审查 PDF 下载。' : '已发起原始 JSON 下载。';
       } finally {
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 60000);
       }
     } catch (error) {
-      status.textContent = 'PDF 导出失败：' + error.message;
+      status.textContent = '实验记录导出失败：' + error.message;
     }
-  });
+  }
+  button.addEventListener('click', () => downloadArchive('pdf'));
+  rawArchiveButton.addEventListener('click', () => downloadArchive('json'));
   const nav = document.querySelector('.workspaceNav');
   nav.addEventListener('click', event => {
     const link = event.target.closest('a');

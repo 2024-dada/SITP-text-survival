@@ -1422,6 +1422,20 @@
       && /容器|瓶|水壶|水桶|罐|杯|container|bottle|flask/i.test(String(item.name || '')));
   }
 
+  function actionBlockReason(activity, inventory, hasFishTarget) {
+    const text = String(activity);
+    if (/(熄火|灭火|灭掉.{0,4}火|余烬|复燃)/.test(text)) return '没有已确认的火源或余烬。';
+    if (/(生火|点火|引燃|点燃|添柴|火坑|火堆|篝火)/.test(text)) return '当前结算没有火源或火堆建造状态，无法确认该操作。';
+    if (/(处理|清理|清洗|剖|烤|煮|蒸|吃|食用|进食).{0,8}(鱼|渔获)/.test(text) && !(inventory.R05?.amount > 0)) {
+      return '随身物品没有已入账的鱼。';
+    }
+    if (/(烹饪|做饭|烧烤|烤鱼|烤肉|煮水|烧水|煮鱼|蒸鱼|做熟|加热食物)/.test(text)) return '没有已确认的火源，无法结算烹饪。';
+    if (/(饮用|饮水|喝水|喝.{0,4}水|进食|食用|吃下|吃.{0,5}(鱼|椰|食物))/.test(text)) return '当前结算未接入物品到摄入的状态转换。';
+    if (/(处理|清理|清洗|剖).{0,8}(鱼|渔获)/.test(text)) return '当前结算没有渔获加工状态。';
+    if (!hasFishTarget && /(捕鱼|钓鱼|投钓|垂钓|下钩|抛竿)/.test(text)) return '捕鱼需要对应的鱼类库存点位。';
+    return '';
+  }
+
   function prepareTimelineSettlement(active, pending) {
     if (pending.settlement) return pending.settlement;
     const world = cloneJson(pending.worldSnapshot);
@@ -1436,26 +1450,40 @@
     for (const [index, step] of pending.plan.steps.entries()) {
       const idleMinutes = step.start_offset_minutes - elapsed;
       if (idleMinutes > 0) M.tick(world, idleMinutes / 60);
-      const candidate = step.point_id ? candidates.get(step.point_id) : null;
+      const positionBefore = position.slice();
+      const plannedCandidate = step.point_id ? candidates.get(step.point_id) : null;
+      const hasFishTarget = step.resource_id === 'R05' && plannedCandidate?.siteId && plannedCandidate.resources.some(item => item.resource === 'R05');
+      const blockReason = actionBlockReason(step.activity, inventory, hasFishTarget);
+      const candidate = blockReason ? null : plannedCandidate;
       const point = candidate ? [candidate.east_m, candidate.north_m] : position.slice();
       position = point.slice();
       world.selected = point.slice();
       const startWeather = M.weather(world.hour, world.seed, point);
       const sceneBefore = M.observe ? M.observe(world, point) : null;
-      const draw = M.rnd(world.seed, `timeline:${pending.context.round}:${index}:${step.time_label}:${step.activity}`);
-      const randomDraw = Math.floor(draw * 10000) / 100;
-      const sampledSuccess = draw * 100 < step.probability_percent;
-      let success = sampledSuccess;
-      let resultText = String(success ? step.success_result : step.failure_result).trim();
-      let settlementText = '模拟估计，仅推进时间；未改变岛屿资源库存。';
+      const resourceBefore = step.resource_id ? {
+        id: step.resource_id,
+        carried: inventory[step.resource_id]?.amount ?? 0,
+        available: ['W01', 'W02'].includes(step.resource_id)
+          ? world.water[step.resource_id] ?? null
+          : world.sites.find(site => site.id === candidate?.siteId)?.pools.find(pool => pool.resource === step.resource_id)?.amount ?? null,
+        unit: candidate?.resources.find(item => item.resource === step.resource_id)?.unit ?? null
+      } : null;
+      const draw = blockReason ? null : M.rnd(world.seed, `timeline:${pending.context.round}:${index}:${step.time_label}:${step.activity}`);
+      const randomDraw = draw === null ? null : Math.floor(draw * 10000) / 100;
+      const sampledSuccess = draw === null ? null : draw * 100 < step.probability_percent;
+      let success = sampledSuccess === true;
+      let resultText = blockReason || String(success ? step.success_result : step.failure_result).trim();
+      let settlementText = blockReason ? '行动未执行，该时段按原地等待推进。' : '模拟估计，仅推进时间；未改变岛屿资源库存。';
       let collected = null;
 
       if (success && step.resource_id) {
         const resource = candidate?.resources.find(item => item.resource === step.resource_id);
         if (!candidate || !resource || !candidate.siteId) {
-          settlementText = `本轮地图没有与 ${step.resource_id} 对应的可结算点位；报告保留模拟估计，库存不变。`;
+          success = false;
+          resultText = settlementText = `本轮地图没有与 ${step.resource_id} 对应的可结算点位，库存不变。`;
         } else if (['R04', 'R08'].includes(step.resource_id)) {
-          settlementText = `${resource.name}在当前地图数据中用于活动/观察记录，不按采集物扣减库存。`;
+          success = false;
+          resultText = settlementText = `${resource.name}只可观察，本次采集未完成。`;
         } else if (['W01', 'W02'].includes(step.resource_id)) {
           if (!candidate.waterSource || !hasCarriedContainer(inventory)) {
             success = false;
@@ -1498,6 +1526,7 @@
         }
       }
 
+      if (collected) resultText = `随身物品增加 ${collected.name} ${formatQuantity(collected.amount)} ${collected.unit}。`;
       M.tick(world, step.duration_minutes / 60);
       elapsed = step.start_offset_minutes + step.duration_minutes;
       const endWeather = M.weather(world.hour, world.seed, point);
@@ -1507,7 +1536,12 @@
         durationMinutes: step.duration_minutes,
         assumption: step.assumption, pointReason: step.point_reason,
         probability: step.probability_percent, randomDraw,
-        sampledSuccess, success, resultText, settlementText, collected,
+        sampledSuccess, success, blocked: Boolean(blockReason), resultText, settlementText, collected,
+        positionBefore, positionAfter: position.slice(),
+        resourceBefore,
+        resourceCarriedAfter: resourceBefore ? inventory[resourceBefore.id]?.amount ?? 0 : null,
+        ruleEvidence: ['R05', 'R06', 'R07'].includes(step.resource_id) && sampledSuccess
+          ? '岸边采集要求白昼且模拟潮位不高于 0 m。' : '',
         point: candidate ? { id: candidate.id, name: candidate.name, zone: candidate.zone, east_m: candidate.east_m, north_m: candidate.north_m } : null,
         startTime: worldTimeText(startWeather.date), endTime: worldTimeText(endWeather.date),
         weatherStart: weatherText(startWeather), weatherEnd: weatherText(endWeather),
@@ -1590,7 +1624,7 @@
         success_probability_percent: step.probability,
         sampled_success: step.sampledSuccess,
         success: step.success,
-        result_code: step.success ? 'completed' : 'not_completed',
+        result_code: step.blocked ? 'blocked' : step.success ? 'completed' : 'not_completed',
         point_id: step.point?.id || null,
         resource_id: step.collected?.resource || null,
         collected_amount: step.collected?.amount || 0,
@@ -1610,13 +1644,10 @@
       && !/(参数|数值|单位|指标|计划|资源量|渔获|工具|模拟推演)/.test(statement)
       ? statement : '';
     if (!steps.length) return safeSelfReport ? `求生者自述：${safeSelfReport}` : '本轮没有安排具体行动，暂无新的身体感受记录。';
-    const minutes = settlement?.durationMinutes || steps.reduce((sum, step) => sum + (Number(step.durationMinutes || step.duration_minutes) || 0), 0);
-    const physicalEffort = steps.some(step => /行走|前往|寻找|采集|捕鱼|捕捞|搬|搭建|砍|攀|爬|收集|搬运|处理|生火/.test(String(step.activity || '')));
-    const sensation = physicalEffort
-      ? '结合活动内容推测，连续行动后可能会有些疲惫，适合休息并留意补水。'
-      : '结合活动内容推测，本轮身体负荷较轻。';
-    const activityText = physicalEffort ? '进行了体力活动' : '以较轻的观察活动为主';
-    return `${safeSelfReport ? `求生者自述：${safeSelfReport}。` : ''}本轮${activityText}，持续约 ${minutes} 分钟。${sensation}`;
+    const physicalEffort = steps.some(step => step.collected);
+    return physicalEffort
+      ? '我收集到了一些材料。忙过这一阵，我可能有些累。这是根据活动作出的感受推测。'
+      : '有些原本想做的事没做成。我还说不准这段时间身体有什么变化。';
   }
 
   function fallbackEventNarrative(pending, plan, settlement, noActivitySettlement) {
@@ -1625,6 +1656,7 @@
     const outcomes = timeline.map((step, index) => {
       const time = step.timeLabel || step.time_label || `第 ${index + 1} 项`;
       const activity = String(step.activity || '行动').trim();
+      if (step.blocked) return `${time} ${activity}，未执行：${step.resultText}`;
       const probability = Number.isFinite(step.probability) ? step.probability : Number(step.probability_percent);
       const result = String(step.resultText || (step.sampledSuccess ? step.success_result : step.failure_result) || '').trim();
       const sampled = typeof step.sampledSuccess === 'boolean' ? `，种子抽样${step.sampledSuccess ? '命中' : '未中'}` : '';
@@ -1653,8 +1685,7 @@
       round: pending.context.round,
       researcher_prompt: pending.context.researcher_prompt,
       body: pending.context.body,
-      survivor_agent_output: pending.context.agent_outputs.find(agent => agent.agent === '求生者 Agent') || null,
-      timeline: pending.settlement?.steps || pending.plan?.steps || [],
+      timeline: pending.settlement?.steps || [],
       event_status: eventStatus || '本轮没有确认具体行动事件。'
     };
     const response = await requestCompletion(settings, [
@@ -1669,11 +1700,11 @@
   }
 
   function worldTimeText(date) {
-    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')} ${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
+    return `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
   }
 
   function weatherText(weather) {
-    return `${weather.label} · ${weather.rain.toFixed(1)} mm/h · ${weather.temperature.toFixed(1)} ℃ · ${weather.daylight ? '白昼' : '夜间'}`;
+    return `${weather.label} · ${weather.rain.toFixed(1)} mm/h · ${weather.temperature.toFixed(1)} ℃ · ${weather.daylight ? '白昼' : '夜间'} · 模拟潮位 ${weather.tide.toFixed(2)} m`;
   }
 
   function reportField(parent, label, value) {
@@ -1739,7 +1770,9 @@
           const settlement = document.createElement('p');
           title.textContent = `${step.timeLabel} · ${step.activity}`;
           resultText.className = 'eventTimelineResult';
-          resultText.textContent = `耗时 ${step.durationMinutes} 分钟 · 成功率推算 ${step.probability}% · 种子抽样 ${step.randomDraw.toFixed(2)}%（${step.sampledSuccess ? '抽样成功' : '抽样未中'}）${step.sampledSuccess !== step.success ? ' · 实际规则复核后未完成' : ''}：${step.resultText}`;
+          resultText.textContent = step.blocked
+            ? `未执行 · 原地等待 ${step.durationMinutes} 分钟 · 未抽样：${step.resultText}`
+            : `耗时 ${step.durationMinutes} 分钟 · 成功率推算 ${step.probability}% · 种子抽样 ${step.randomDraw.toFixed(2)}%（${step.sampledSuccess ? '抽样成功' : '抽样未中'}）${step.sampledSuccess !== step.success ? ' · 实际规则复核后未完成' : ''}：${step.resultText}`;
           assumption.className = 'eventTimelineAssumption';
           assumption.textContent = `推算依据：${step.assumption}`;
           settlement.className = 'eventTimelineSettlement';
@@ -1889,20 +1922,19 @@
       G.IslandApp?.setEventMarkers(previews);
       el('eventMapCount').textContent = `${previews.length} 个点位${previews.length ? '（待结算）' : ''}`;
       const settlement = plan.steps.length ? prepareTimelineSettlement(active, pending) : null;
+      const requiresSettlementOnly = settlement?.steps.some(step => !step.success);
       const noActivitySettlement = pending.planRecoveryNote
         ? '行动计划没有形成可结算数据；本轮仅整理已提交的研究者输入与 Agent 推理，岛屿时间和资源保持不变。'
         : '本轮没有安排行动时段；已整理研究者输入与 Agent 推理，岛屿时间和资源未变化。';
 
-      if (!pending.narrative && !settings) {
+      if (!pending.narrative && (!settings || requiresSettlementOnly)) {
         pending.narrative = fallbackEventNarrative(pending, plan, settlement, noActivitySettlement);
-        pending.narrativeRecoveryNote = '按研究者确认的时间线和本地结算记录整理。';
+        pending.narrativeRecoveryNote = '依据已结算的行动、库存与现场记录整理。';
       }
       if (!pending.narrative) {
         const resultContext = {
           round: pending.context.round,
           researcher_prompt: pending.context.researcher_prompt,
-          agents: pending.context.agent_outputs,
-          timeline_plan: plan.steps,
           timeline_results: settlement?.steps || [],
           state_settlement: settlement?.summary || noActivitySettlement,
           plan_recovery_note: pending.planRecoveryNote || '',
