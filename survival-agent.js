@@ -53,6 +53,10 @@
   let lastAgentRoundState = '等待首次运行';
   let lastAgentRoundError = '';
   let lastAgentRoundResults = [];
+  let recentExperiments = [];
+  let historyDatabase = null;
+  let historyReady = null;
+  let historyStorageError = '';
   const apiKeyStorageName = 'olorua.sitp.model-api-key';
   const apiBaseUrlStorageName = 'olorua.sitp.model-api-base-url';
   const apiModelStorageName = 'olorua.sitp.model-api-model';
@@ -181,6 +185,113 @@
     el('retryAgentRound').disabled = busy;
     el('endAgentInteraction').disabled = busy || !active;
     el('agentRoundPrompt').disabled = busy || pending || Boolean(session);
+    renderExperimentHistory();
+  }
+
+  function renderExperimentHistory() {
+    const select = el('recentExperiment');
+    const activeId = interactionSession?.historyId || '';
+    select.replaceChildren(new Option(activeId ? '选择其他实验' : '选择一条实验记录', ''));
+    for (const record of recentExperiments) {
+      const date = new Date(record.updatedAt).toLocaleString();
+      select.append(new Option(`${date} · ${record.active.round} 轮 · ${record.title}`, record.active.historyId));
+    }
+    select.value = recentExperiments.some(record => record.active.historyId === activeId) ? activeId : '';
+    select.disabled = busy || Boolean(session) || !recentExperiments.length;
+    el('experimentHistoryStatus').textContent = historyStorageError || (recentExperiments.length
+      ? `已保留 ${recentExperiments.length}/3 次实验`
+      : '运行实验后自动保存最近 3 次。');
+  }
+
+  function openExperimentHistory() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('olorua-experiment-history', 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('history');
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error('本地记录被另一标签页占用'));
+      request.onsuccess = () => {
+        historyDatabase = request.result;
+        const read = historyDatabase.transaction('history').objectStore('history').get('recent');
+        read.onsuccess = () => {
+          recentExperiments = Array.isArray(read.result) ? read.result.slice(0, 3) : [];
+          resolve();
+        };
+        read.onerror = () => reject(read.error);
+      };
+    }).catch(() => {
+      historyStorageError = '浏览器无法读取本地记录，本页内仍可切换。';
+    }).finally(renderExperimentHistory);
+  }
+
+  function saveExperimentHistory() {
+    if (!interactionSession || busy) return;
+    const record = redactExperimentData({
+      active: interactionSession,
+      world: G.IslandApp.getWorldState(), position: G.IslandApp.getPosition(),
+      prompt: el('agentRoundPrompt').value,
+      title: (interactionSession.archiveRounds[0]?.researcher_input || interactionSession.retryPrompt || '岛屿实验').slice(0, 28),
+      updatedAt: Date.now(),
+      modelCalls, agentToolDialogueTurns, toolTurnsBySystem: [...agentToolDialogueBySystem],
+      responses: [...roundResponseLedger], lastAgentRoundNumber, lastAgentRoundState,
+      lastAgentRoundError, lastAgentRoundResults,
+      displayStatus: el('agentInteractionStatus').textContent,
+      displayStatusKind: el('agentInteractionStatus').dataset.kind
+    });
+    historyReady.then(() => {
+      recentExperiments = [record, ...recentExperiments.filter(item => item.active.historyId !== record.active.historyId)].slice(0, 3);
+      renderExperimentHistory();
+      if (!historyDatabase) return;
+      return new Promise((resolve, reject) => {
+        const tx = historyDatabase.transaction('history', 'readwrite');
+        tx.oncomplete = resolve;
+        tx.onabort = () => reject(tx.error);
+        tx.objectStore('history').put(recentExperiments, 'recent');
+      });
+    }).catch(() => {
+      historyStorageError = '本地记录保存失败，本页内仍可切换。请导出重要记录。';
+      renderExperimentHistory();
+    });
+  }
+
+  function restoreExperimentHistory() {
+    if (busy || session) return;
+    const record = recentExperiments.find(item => item.active.historyId === el('recentExperiment').value);
+    if (!record || record.active.historyId === interactionSession?.historyId) return;
+    saveExperimentHistory();
+    try {
+      G.IslandApp.setWorldState(cloneJson(record.world), record.position);
+      interactionSession = cloneJson(record.active);
+      roundResponseLedger = new Map(record.responses);
+      modelCalls = record.modelCalls;
+      agentToolDialogueTurns = record.agentToolDialogueTurns;
+      agentToolDialogueBySystem.clear();
+      for (const [id, count] of record.toolTurnsBySystem) agentToolDialogueBySystem.set(id, count);
+      lastAgentRoundNumber = record.lastAgentRoundNumber;
+      lastAgentRoundState = record.lastAgentRoundState;
+      lastAgentRoundError = record.lastAgentRoundError;
+      lastAgentRoundResults = cloneJson(record.lastAgentRoundResults);
+      el('agentTranscript').replaceChildren();
+      for (const round of interactionSession.archiveRounds) {
+        appendAgentRound(round.round, round.researcher_input, round.inference, new Map(round.model_responses || []));
+      }
+      el('agentRoundCount').textContent = String(interactionSession.round);
+      el('agentRoundPrompt').value = record.prompt;
+      el('agentRoundPrompt').dispatchEvent(new Event('input', { bubbles: true }));
+      el('modelCallCount').textContent = String(modelCalls);
+      el('agentModelCallCount').textContent = '模型请求 ' + modelCalls;
+      el('agentFailurePanel').hidden = !lastAgentRoundError;
+      el('agentFailureText').textContent = lastAgentRoundError ? lastAgentRoundError + formatResponseLedger() : '';
+      updateAgentToolDialogueCounter();
+      renderFramework();
+      renderEventReportPanel(interactionSession);
+      setAgentStatus(record.displayStatus || lastAgentRoundState || '已恢复实验', record.displayStatusKind || '');
+      status('已切换到所选实验。', 'ok');
+    } catch (error) {
+      status('无法恢复此实验：' + error.message, 'error');
+    } finally {
+      updateFrameworkControls();
+      updateAgentInteractionControls();
+    }
   }
 
   function setAgentStatus(text, kind) {
@@ -1153,7 +1264,7 @@
     container.append(article);
   }
 
-  function appendAgentRound(roundNumber, researcherPrompt, inference) {
+  function appendAgentRound(roundNumber, researcherPrompt, inference, responses = roundResponseLedger) {
     const block = document.createElement('section');
     const heading = document.createElement('h3');
     const transcript = document.createElement('div');
@@ -1166,7 +1277,7 @@
     for (const result of inference.results) {
       const speaker = displayAgentName(result.systemId);
       appendAgentMessage(transcript, speaker, result.finalText || '（本轮没有补充文本发言）', '公开发言', 'agent');
-      const responseRecords = roundResponseLedger.get(result.systemId) || [];
+      const responseRecords = responses.get(result.systemId) || [];
       if (responseRecords.length) {
         const details = document.createElement('details');
         const summary = document.createElement('summary');
@@ -2136,6 +2247,7 @@
         setBusy(false);
         updateAgentInteractionControls();
         renderEventReportPanel(active);
+        saveExperimentHistory();
       }
     };
     editor.append(summary, label, candidates, button, feedback);
@@ -2154,6 +2266,7 @@
     updateFrameworkControls();
     updateAgentInteractionControls();
     renderEventReportPanel(interactionSession);
+    saveExperimentHistory();
   }
 
   function formatResponseLedger() {
@@ -2174,6 +2287,9 @@
       if (!interactionSession) {
         const frame = interactionFrame();
         interactionSession = {
+          historyId: crypto.randomUUID(),
+          startWorld: cloneJson(G.IslandApp.getWorldState()),
+          startPosition: G.IslandApp.getPosition(),
           frame, frameworkAnchor: cloneJson(frame), frameworkCommandLog: [], round: 0,
           previousRoundMessages: [], retryPrompt: null, retryRecipients: [],
           eventReports: [], eventMarkers: [], pendingEventReport: null, inventory: {}, archiveRounds: []
@@ -2269,12 +2385,15 @@
       updateFrameworkControls();
       updateAgentInteractionControls();
       renderEventReportPanel(interactionSession);
+      saveExperimentHistory();
     }
   }
 
   function endAgentInteraction() {
     if (!interactionSession || busy) return;
-    if (!confirm('结束并重置会话会清除本次 Agent 对话和状态修改；载入的原始 JSON 会保留。确定继续吗？')) return;
+    if (!confirm('结束当前实验并返回初始状态？本次实验会保存在最近记录里。')) return;
+    saveExperimentHistory();
+    G.IslandApp.setWorldState(cloneJson(interactionSession.startWorld), interactionSession.startPosition);
     interactionSession = null;
     clearEventReportPanel('会话已重置，点位与事件报告已清空。');
     roundResponseLedger = new Map();
@@ -2291,6 +2410,7 @@
     el('agentModelCallCount').textContent = '模型请求 0';
     el('agentRoundCount').textContent = '0';
     el('agentRoundPrompt').value = '';
+    el('agentRoundPrompt').dispatchEvent(new Event('input', { bubbles: true }));
     el('agentTranscript').replaceChildren();
     const empty = document.createElement('p');
     empty.className = 'emptyLog';
@@ -2641,6 +2761,7 @@
   el('retryAgentRound').addEventListener('click', () => runAgentInteractionRound(true));
   el('retryEventReport').addEventListener('click', retryEventReport);
   el('endAgentInteraction').addEventListener('click', endAgentInteraction);
+  el('recentExperiment').addEventListener('change', restoreExperimentHistory);
   el('actionKind').addEventListener('change', updateActionFields);
   el('collectSite').addEventListener('change', () => refreshResourceOptions());
   el('runAction').addEventListener('click', () => {
@@ -2654,6 +2775,7 @@
   setFrameworkStatus('正在载入网站附带的 A/B/C 参数参考 Agent；若自动载入失败，可在此手动选择 JSON。');
   setAgentStatus('正在载入 A/B/C 参考框架…', '');
   renderFramework();
+  historyReady = openExperimentHistory();
   loadBundledAgentFramework();
   loadRememberedKey();
   prepareAutomaticConnection();
@@ -2759,6 +2881,17 @@
     return { items, omitted, errors, roundCount: active.archiveRounds.length, agentCount: systems.length };
   }
 
+  function redactExperimentData(data) {
+    const key = el('aiApiKey').value.trim();
+    function redact(value, name = '') {
+      if (/api.?key|secret|password|credential/i.test(name)) return '[已隐藏]';
+      if (Array.isArray(value)) return value.map(item => redact(item));
+      if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([childName, child]) => [childName, redact(child, childName)]));
+      return typeof value === 'string' && key ? value.split(key).join('[已隐藏]') : value;
+    }
+    return redact(data);
+  }
+
   function getExperimentArchive() {
     if (!interactionSession) return null;
     const active = interactionSession;
@@ -2769,14 +2902,7 @@
       reports: active.eventReports,
       current: { frame: active.frame, world: G.IslandApp.getWorldState(), inventory: active.inventory, commands: active.frameworkCommandLog, pending_report: active.pendingEventReport, failed_responses: active.retryPrompt !== null ? [...roundResponseLedger.entries()] : [] }
     };
-    const key = el('aiApiKey').value.trim();
-    function redact(value, name = '') {
-      if (/api.?key|secret|password|credential/i.test(name)) return '[已隐藏]';
-      if (Array.isArray(value)) return value.map(item => redact(item));
-      if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([childName, child]) => [childName, redact(child, childName)]));
-      return typeof value === 'string' && key ? value.split(key).join('[已隐藏]') : value;
-    }
-    return redact(archive);
+    return redactExperimentData(archive);
   }
   G.SurvivalAgent = Object.freeze({ refreshAfterIslandRender, getMonitorSnapshot, getExperimentArchive, generateReviewerAgentPrompts });
   new MutationObserver(refreshAfterIslandRender).observe(el('nearby'), { childList: true });
