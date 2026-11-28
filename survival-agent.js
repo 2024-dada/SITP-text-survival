@@ -570,14 +570,14 @@
     const key = el('aiApiKey').value.trim();
     const baseUrl = el('aiBaseUrl').value.trim();
     if (!key) {
-      el('providerStatus').textContent = '请填写非空 API Key；不限制 Key 前缀或长度。';
+      el('providerStatus').textContent = '粘贴 API Key 后，网页会尝试识别服务商。';
       emitMonitorUpdate();
       return null;
     }
     if (!baseUrl) {
       el('providerStatus').textContent = el('tongjiProvider').checked
         ? '已选择同济大学 AGI；请检查官方 Base URL。'
-        : 'Key 前缀无法唯一识别服务商；请选择服务商，或填写官方 Base URL。';
+        : '请选择这个 Key 所属的服务商。自定义服务可展开连接选项填写地址。';
       emitMonitorUpdate();
       return null;
     }
@@ -600,6 +600,7 @@
     clearTimeout(modelDiscoveryTimer);
     modelQuery += 1;
     el('aiModelChoices').replaceChildren(new Option('请测试此地址或手动填写模型名', ''));
+    delete el('aiModelChoices').dataset.discovery;
     resolveConnection();
     updateBalanceAvailability();
     emitMonitorUpdate();
@@ -677,6 +678,7 @@
     if (busy) return;
     const query = ++modelQuery;
     const select = el('aiModelChoices');
+    select.dataset.discovery = 'loading';
     select.replaceChildren(new Option('正在获取模型…', ''));
     emitMonitorUpdate();
     try {
@@ -695,17 +697,20 @@
         select.append(new Option(item.name ? item.name + '（' + item.id + '）' : item.id, item.id));
       });
       if (select.options.length > 1) {
-        const preferred = [...select.options].find(option => option.value === el('aiModelName').value) || select.options[1];
-        select.value = preferred.value;
-        if (!el('aiModelName').value.trim()) el('aiModelName').value = preferred.value;
+        const currentModel = el('aiModelName').value.trim();
+        const preferred = currentModel || select.options[1].value;
+        select.value = [...select.options].some(option => option.value === preferred) ? preferred : '';
+        if (!currentModel) el('aiModelName').value = preferred;
         saveRememberedConnection();
         el('providerStatus').textContent = '已连接 ' + settings.provider + ' · 读取到 ' + (select.options.length - 1) + ' 个模型';
       }
+      select.dataset.discovery = select.options.length > 1 ? 'ready' : 'empty';
       status('读到 ' + (select.options.length - 1) + ' 个模型。列表不代表当前 Key 一定有调用权限。', 'ok');
     } catch (error) {
       if (query !== modelQuery) return;
       el('providerStatus').textContent = '';
       select.replaceChildren(new Option('未获取到模型，可手动填写', ''));
+      select.dataset.discovery = 'failed';
       const message = error.message || String(error);
       status(message.includes('拒绝本站的浏览器跨域预检') ? message : message + ' 仍可手动填写模型名。', 'error');
     } finally {
@@ -1720,6 +1725,8 @@
   }
 
   function renderEventReportPanel(active, statusText) {
+    const openHistory = new Set(Array.from(el('eventReportList').querySelectorAll('details[data-report-round][open]'),
+      item => item.dataset.reportRound));
     const list = el('eventReportList');
     const reports = active?.eventReports || [];
     list.replaceChildren();
@@ -1803,7 +1810,18 @@
       reportField(card, '事件前看到的景象', report.beforeScene);
       reportField(card, '事件后看到的景象', report.afterScene);
       reportField(card, '岛屿变化', report.islandSummary);
-      list.append(card);
+      if (report === reports[reports.length - 1]) {
+        list.append(card);
+      } else {
+        const history = document.createElement('details');
+        const title = document.createElement('summary');
+        history.className = 'reportHistory';
+        history.dataset.reportRound = String(report.round);
+        history.open = openHistory.has(history.dataset.reportRound);
+        title.textContent = `第 ${report.round} 轮 · ${report.title || '事件报告'}`;
+        history.append(title, card);
+        list.append(history);
+      }
     }
     const previewMarkers = (active?.pendingEventReport?.plan?.steps || []).flatMap(step => {
       const point = active.pendingEventReport.context.event_candidates.find(candidate => candidate.id === step.point_id);
@@ -2609,7 +2627,13 @@
     }
     emitMonitorUpdate();
   });
-  el('aiModelName').addEventListener('input', () => { saveRememberedConnection(); emitMonitorUpdate(); });
+  el('aiModelName').addEventListener('input', () => {
+    const select = el('aiModelChoices');
+    const name = el('aiModelName').value.trim();
+    select.value = [...select.options].some(option => option.value === name) ? name : '';
+    saveRememberedConnection();
+    emitMonitorUpdate();
+  });
   el('randomSeed').addEventListener('click', randomSeed);
   el('startExperiment').addEventListener('click', startExperiment);
   el('endExperiment').addEventListener('click', endExperiment);

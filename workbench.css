@@ -28,3 +28,115 @@ button:disabled{cursor:not-allowed}
 .exportActions{display:flex;flex-direction:column;align-items:stretch;gap:10px;min-width:min(430px,42%)}.exportActions>button,.reviewerGuideLink{width:100%;min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;white-space:normal;line-height:1.45}.reviewerGuideLink{padding:10px 16px;border:1px solid var(--accent);border-radius:10px;color:var(--accent);background:var(--surface2);text-decoration:none;font-weight:600}.reviewerGuideLink:hover{filter:brightness(.97)}.reviewerPromptStatus,.reviewerPromptNote{margin:0;color:var(--muted);font-size:12px;line-height:1.6}.reviewerPromptNote{letter-spacing:normal}.reviewerPromptManual{width:100%;min-height:180px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface2);color:var(--ink);font:13px/1.6 ui-monospace,Consolas,monospace;resize:vertical}.reviewerPromptManual[hidden]{display:none}
 @media(max-width:720px){.workspaceNav b{display:none}.workspaceNav a{padding:9px;font-size:12px}.exportPanel{align-items:stretch;flex-direction:column;padding:20px}.exportActions{min-width:0}.agentChatPanel{padding:16px}.eventReportCard{padding:14px}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}button,input,select,textarea{transition:none}}
+
+/* Keep the experiment steps aligned across display sizes and themes. */
+main{max-width:1440px}
+.workspaceNav{padding:8px 0;gap:4px}
+.workspaceNav a{font-weight:650}
+.connectionPanelHead h2,.agentChatHead h2,.eventWorkbench h2,.parameterMonitor h2{font-size:clamp(16px,1.45vw,21px);line-height:1.3}
+.visibleConnection.aiSettings{padding:clamp(14px,2vw,24px)}
+.visibleConnection .connectionGrid{align-items:start;row-gap:14px}
+.connectionActions{align-self:end;min-width:0}
+.connectionActions button{white-space:normal}
+.connectionGrid .connectionToggles{align-self:center}
+.connectionGrid label,.connectionGrid small,.visibleConnection [role=status]{overflow-wrap:anywhere}
+.visibleConnection [role=status]:empty{display:none}
+.connectionGrid input:not([type=checkbox]),.connectionGrid select{min-height:42px}
+.intro{margin:22px 0 14px}
+.intro h1{margin:0 0 8px;font-weight:700}
+.intro p{margin:0;font-size:14px;line-height:1.55}
+.agentChatHead,.agentRoster{align-items:start}
+.agentChatMeta{min-width:0;overflow-wrap:anywhere}
+.workspaceResultLink{display:inline-flex;align-items:center;min-height:42px;padding:8px 12px;border-radius:8px;color:var(--accent);text-decoration:none;font-weight:650}
+.workspaceResultLink:hover{background:var(--surface2)}
+.workspaceDisclosure{border:1px solid var(--line);border-radius:12px;background:var(--surface2)}
+.workspaceDisclosure>summary{padding:12px 14px;cursor:pointer;font-weight:650}
+.workspaceDisclosure>.transcriptTools{padding:8px 12px;margin:0}
+.workspaceDisclosure>.agentTranscript{min-height:0;margin:0;border:0}
+.eventWorkbench{align-items:start}
+.eventMapPane .mapPanel>.panelHead>div{flex-wrap:wrap;justify-content:flex-end}
+.eventWorkbench .panelHead{flex-wrap:wrap}
+.eventReportList{max-height:none;overflow:visible;min-height:0}
+.eventReportPane,.eventReportCard,.eventReportStatus{overflow-wrap:anywhere}
+.exportPanel{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);align-items:start}
+.exportActions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;min-width:0}
+.exportActions #exportExperimentPdf{background:var(--accent);color:var(--paper);font-weight:700}
+.exportActions .reviewerPromptStatus,.exportActions .reviewerPromptNote,.exportActions .reviewerPromptManual{grid-column:1/-1}
+@media(max-width:900px){.exportPanel{grid-template-columns:1fr;gap:14px}}
+@media(max-width:600px){
+ .workspaceNav{margin-bottom:10px}
+ .workspaceNav a{padding:8px}
+ .intro{margin:16px 0 12px;padding:8px 0}
+ .exportActions{grid-template-columns:1fr}
+ .eventWorkbench .panelHead>div{min-width:0}
+ .eventMapPane .mapPanel>.panelHead>div{justify-content:flex-start}
+ .agentChatHead{flex-wrap:wrap}
+}
+/* Visual hierarchy follows the order of the experiment. */
+main{max-width:1320px}
+body::before{background:radial-gradient(ellipse at 15% 0%,color-mix(in srgb,var(--glow) 55%,transparent),transparent 52%)}
+body :is(.panel,.observerSidebar,.parameterMonitor){box-shadow:0 8px 28px #0000000c}
+body .visibleConnection.aiSettings{background:var(--white)}
+header{height:64px;padding-inline:max(24px,calc((100vw - 1256px)/2))}
+.workspaceNav{background:var(--paper);gap:8px;margin-bottom:18px}
+.workspaceNav a{border-radius:7px}
+.workspaceNav a[aria-current]{box-shadow:inset 0 -2px var(--accent)}
+.intro h1{font-size:clamp(26px,3vw,38px);letter-spacing:-.035em}
+.introNote{max-width:350px;padding-block:4px}
+.connectionGrid .tongjiProviderLabel span,.connectionGrid .rememberKeyLabel span{white-space:normal}
+body :is(button,select,input,textarea){font-variant-numeric:tabular-nums}
+:root[data-mode=light] body #aiStatus[data-kind=error]{color:#8d342f}
+:root:not([data-mode=light]) body #aiStatus[data-kind=error]{color:#ffaaa0}
+body .agentRoundBlock{box-shadow:none}
+body .eventReportCard{background:var(--white)}
+.eventReportOutcome{background:var(--surface2)}
+.eventReportList{padding:clamp(12px,1.6vw,20px)}
+.eventReportStatus{background:var(--surface2)}
+.reportHistory{border:1px solid var(--line);border-radius:10px}
+.reportHistory>summary{padding:10px 14px;cursor:pointer;overflow-wrap:anywhere;font-size:.88em}
+.reportHistory>.eventReportCard{margin:0 8px 8px}
+.exportPanel{box-shadow:0 8px 28px #0000000c}
+.exportActions>button,.exportActions>.reviewerGuideLink{justify-content:flex-start;text-align:left;padding-inline:14px}
+@media(max-width:650px){
+ header{height:auto;min-height:60px;padding:10px 14px}
+ .workspaceNav{gap:2px;margin-bottom:12px}
+ .workspaceNav a{flex:none}
+ .agentChatActions{align-items:center}
+ .agentChatActions #agentModelCallCount{flex-basis:100%}
+ .agentChatPanel,.exportPanel{padding:14px}
+ .eventMapPane #map{height:clamp(260px,48dvh,410px)}
+ .mapCaption{max-width:calc(100% - 24px);overflow-wrap:anywhere}
+ .eventReportCard{padding:12px}
+}
+/* Desktop module rail with the same navigation available on small screens. */
+.workspaceContent{min-width:0}
+.workspaceNav a{display:block}
+.workspaceNav a:focus-visible{outline-offset:-2px}
+.workspaceContent .agentWorkbench{grid-template-columns:minmax(0,1fr);gap:12px}
+.workspaceContent .observerSidebar{position:static}
+.workspaceContent .visibleConnection .connectionGrid{
+ grid-template-columns:repeat(4,minmax(0,1fr));
+ grid-template-areas:"key key provider provider" "model model actions actions" "toggles toggles toggles toggles" "advanced advanced advanced advanced";
+}
+.visibleConnection .connectionAdvanced{grid-area:advanced;min-width:0;padding-top:9px;border-top:1px solid var(--line)}
+.connectionAdvanced>summary{font-size:.82em;cursor:pointer;color:var(--muted)}
+.connectionAdvancedFields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:10px}
+.connectionGrid .connectionAdvancedFields>label{grid-area:auto}
+.visibleConnection .connectionGrid .connectionToggles{gap:12px 20px;align-items:start}
+.connectionGrid .connectionToggles .tongjiProviderLabel{flex:0 1 auto!important}
+@media(min-width:1010px){
+ main.workspaceLayout{display:grid;grid-template-columns:176px minmax(0,1fr);gap:clamp(20px,3vw,40px);padding-top:20px}
+ .workspaceLayout>.workspaceNav{
+  top:18px;align-self:start;flex-direction:column;align-items:stretch;white-space:normal;
+  padding:12px;margin:0;border:1px solid var(--line);border-radius:12px;background:var(--white);overflow:visible
+ }
+ .workspaceLayout>.workspaceNav b{margin:2px 8px 6px;letter-spacing:0}
+ .workspaceLayout>.workspaceNav a[aria-current]{box-shadow:inset 2px 0 var(--accent)}
+}
+@media(min-width:1101px) and (max-width:1280px){
+ .workspaceContent .eventWorkbench{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:650px){
+ .workspaceContent .visibleConnection .connectionGrid{grid-template-columns:minmax(0,1fr);grid-template-areas:"key" "provider" "model" "actions" "toggles" "advanced"}
+ .connectionAdvancedFields{grid-template-columns:1fr}
+}
